@@ -4,7 +4,279 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
 }
 
-// Models will be added as domain modules are implemented.
+enum Marketplace {
+  AMAZON
+  FLIPKART
+  SHOPIFY
+  WOOCOMMERCE
+  BLINKIT
+  ZEPTO
+  MANUAL
+  CSV
+  API
+  WEBHOOK
+}
+
+enum PaymentType {
+  PREPAID
+  COD
+  PARTIAL_COD
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum QueueStatus {
+  QUEUED
+  SCHEDULED
+  CALLING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum CallStatus {
+  RINGING
+  CONNECTED
+  FAILED
+  NO_ANSWER
+  BUSY
+  VOICEMAIL
+}
+
+model Workspace {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  slug                   String                  @unique
+  metadata               Json?
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  deletedAt              DateTime?
+  users                  User[]
+  customers              Customer[]
+  orders                 Order[]
+  aiAgents               AiAgent[]
+  knowledgeBases         KnowledgeBase[]
+  marketplaceConnections MarketplaceConnection[]
+  importJobs             ImportJob[]
+  automations            Automation[]
+
+  @@index([deletedAt])
+}
+
+model User {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  email       String    @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([deletedAt])
+}
+
+model Customer {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  phone       String
+  email       String?
+  language    String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  orders      Order[]
+  calls       Call[]
+
+  @@index([workspaceId])
+  @@index([phone])
+  @@index([workspaceId, deletedAt])
+}
+
+model Order {
+  id                 String      @id @default(uuid()) @db.Uuid
+  workspaceId        String      @db.Uuid
+  customerId         String      @db.Uuid
+  marketplace        Marketplace
+  marketplaceOrderId String?
+  paymentType        PaymentType
+  status             OrderStatus @default(PENDING)
+  totalAmount        Decimal     @db.Decimal(12, 2)
+  currency           String      @default("INR") @db.VarChar(3)
+  shippingAddress    Json?
+  notes              String?
+  metadata           Json?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  workspace          Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer           Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items              OrderItem[]
+  callQueue          CallQueue[]
+
+  @@unique([workspaceId, marketplace, marketplaceOrderId])
+  @@index([customerId])
+  @@index([marketplaceOrderId])
+  @@index([status])
+}
+
+model OrderItem {
+  id        String   @id @default(uuid()) @db.Uuid
+  orderId   String   @db.Uuid
+  name      String
+  sku       String?
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model AiAgent {
+  id              String         @id @default(uuid()) @db.Uuid
+  workspaceId     String         @db.Uuid
+  knowledgeBaseId String?        @db.Uuid
+  name            String
+  description     String?
+  configuration   Json?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  knowledgeBase   KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  callQueue       CallQueue[]
+
+  @@index([workspaceId])
+  @@index([knowledgeBaseId])
+  @@index([workspaceId, deletedAt])
+}
+
+model CallQueue {
+  id           String      @id @default(uuid()) @db.Uuid
+  orderId      String      @db.Uuid
+  aiAgentId    String      @db.Uuid
+  status       QueueStatus @default(QUEUED)
+  scheduledAt  DateTime?
+  attemptCount Int         @default(0)
+  lastError    String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  aiAgent      AiAgent     @relation(fields: [aiAgentId], references: [id], onDelete: Restrict)
+  calls        Call[]
+
+  @@index([orderId])
+  @@index([aiAgentId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model Call {
+  id              String      @id @default(uuid()) @db.Uuid
+  customerId      String      @db.Uuid
+  callQueueId     String      @db.Uuid
+  status          CallStatus
+  providerCallId  String?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  durationSeconds Int?
+  recordingUrl    String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  customer        Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  callQueue       CallQueue   @relation(fields: [callQueueId], references: [id], onDelete: Cascade)
+  transcript      Transcript?
+
+  @@index([customerId])
+  @@index([callQueueId])
+  @@index([startedAt])
+  @@index([providerCallId])
+}
+
+model Transcript {
+  id        String   @id @default(uuid()) @db.Uuid
+  callId    String   @unique @db.Uuid
+  content   String
+  summary   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  call      Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeBase {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  content     String?
+  sourceUrl   String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  aiAgents    AiAgent[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, deletedAt])
+}
+
+model MarketplaceConnection {
+  id                String      @id @default(uuid()) @db.Uuid
+  workspaceId       String      @db.Uuid
+  marketplace       Marketplace
+  credentials       Json
+  externalAccountId String?
+  lastSyncedAt      DateTime?
+  isActive          Boolean     @default(true)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  deletedAt         DateTime?
+  workspace         Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, marketplace])
+  @@index([workspaceId])
+  @@index([workspaceId, deletedAt])
+}
+
+model ImportJob {
+  id              String      @id @default(uuid()) @db.Uuid
+  workspaceId     String      @db.Uuid
+  source          Marketplace
+  sourceReference String?
+  completedAt     DateTime?
+  errorMessage    String?
+  metadata        Json?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  workspace       Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Automation {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  name        String
+  description String?
+  definition  Json
+  isEnabled   Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([deletedAt])
+}
