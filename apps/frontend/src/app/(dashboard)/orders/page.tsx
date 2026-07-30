@@ -15,6 +15,7 @@ import {
   Package,
   Phone,
   Plus,
+  Save,
   Search,
   ShoppingBag,
   Sparkles,
@@ -126,6 +127,7 @@ const orderDetails = {
 
 export default function OrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<(typeof orders)[number] | null>(null);
+  const [isNewOrderOpen, setIsNewOrderOpen] = useState(false);
 
   return (
     <>
@@ -135,7 +137,7 @@ export default function OrdersPage() {
           <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Orders</h1>
           <p className="mt-1 text-muted-foreground">Manage customer orders and AI calling workflow.</p>
         </div>
-        <Button className="w-full sm:w-auto">
+        <Button className="w-full sm:w-auto" onClick={() => setIsNewOrderOpen(true)}>
           <Plus data-icon="inline-start" />
           New Order
         </Button>
@@ -228,6 +230,66 @@ export default function OrdersPage() {
       </Card>
       </div>
 
+      <Sheet open={isNewOrderOpen} onOpenChange={setIsNewOrderOpen}>
+        <SheetContent className="w-full gap-0 overflow-y-auto p-0 sm:max-w-xl" side="right">
+          <SheetHeader className="border-b px-6 py-5 pr-14">
+            <SheetTitle className="text-xl">Create New Order</SheetTitle>
+            <SheetDescription>Add customer, order, shipping, and AI calling details.</SheetDescription>
+          </SheetHeader>
+
+          <form className="space-y-5 p-5 pb-28 sm:p-6 sm:pb-28" onSubmit={(event) => { event.preventDefault(); setIsNewOrderOpen(false); }}>
+            <CreateOrderSection title="Customer">
+              <FormField label="Name" htmlFor="customer-name"><Input id="customer-name" placeholder="Customer name" defaultValue="Riya Malhotra" /></FormField>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Phone" htmlFor="customer-phone"><Input id="customer-phone" type="tel" placeholder="+91 00000 00000" defaultValue="+91 98765 12345" /></FormField>
+                <FormField label="Email" htmlFor="customer-email"><Input id="customer-email" type="email" placeholder="name@example.com" defaultValue="riya@example.com" /></FormField>
+              </div>
+            </CreateOrderSection>
+
+            <CreateOrderSection title="Order">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Marketplace" htmlFor="new-marketplace"><Select defaultValue="shopify"><SelectTrigger id="new-marketplace" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="shopify">Shopify</SelectItem><SelectItem value="amazon">Amazon</SelectItem><SelectItem value="flipkart">Flipkart</SelectItem><SelectItem value="meesho">Meesho</SelectItem></SelectContent></Select></FormField>
+                <FormField label="Payment Type" htmlFor="new-payment"><Select defaultValue="cod"><SelectTrigger id="new-payment" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="cod">Cash on Delivery</SelectItem><SelectItem value="prepaid">Prepaid</SelectItem><SelectItem value="partial">Partial payment</SelectItem></SelectContent></Select></FormField>
+              </div>
+              <FormField label="Order Value" htmlFor="order-value"><Input id="order-value" inputMode="numeric" placeholder="₹0.00" defaultValue="₹2,499" /></FormField>
+            </CreateOrderSection>
+
+            <CreateOrderSection title="Products">
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_90px_110px]">
+                <FormField label="Product Name" htmlFor="product-name"><Input id="product-name" placeholder="Product name" defaultValue="Classic Cotton T-Shirt" /></FormField>
+                <FormField label="Quantity" htmlFor="product-quantity"><Input id="product-quantity" type="number" min="1" defaultValue="1" /></FormField>
+                <FormField label="Price" htmlFor="product-price"><Input id="product-price" inputMode="numeric" defaultValue="₹1,299" /></FormField>
+              </div>
+              <Button type="button" variant="outline" size="sm"><Plus data-icon="inline-start" />Add Product</Button>
+            </CreateOrderSection>
+
+            <CreateOrderSection title="Shipping">
+              <FormField label="Address" htmlFor="shipping-address"><Input id="shipping-address" placeholder="Street address" defaultValue="14, Park View Road, Indiranagar" /></FormField>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="City" htmlFor="shipping-city"><Input id="shipping-city" placeholder="City" defaultValue="Bengaluru" /></FormField>
+                <FormField label="State" htmlFor="shipping-state"><Input id="shipping-state" placeholder="State" defaultValue="Karnataka" /></FormField>
+              </div>
+              <FormField label="PIN Code" htmlFor="shipping-pin"><Input id="shipping-pin" inputMode="numeric" placeholder="000000" defaultValue="560038" /></FormField>
+            </CreateOrderSection>
+
+            <CreateOrderSection title="AI Configuration">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <FormField label="Agent" htmlFor="ai-agent"><Select defaultValue="priya"><SelectTrigger id="ai-agent" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="priya">Priya · Order Confirmation</SelectItem><SelectItem value="arjun">Arjun · Follow-up</SelectItem><SelectItem value="maya">Maya · Support</SelectItem></SelectContent></Select></FormField>
+                <FormField label="Language" htmlFor="ai-language"><Select defaultValue="en-in"><SelectTrigger id="ai-language" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="en-in">English (India)</SelectItem><SelectItem value="hi-in">Hindi</SelectItem><SelectItem value="hinglish">Hinglish</SelectItem></SelectContent></Select></FormField>
+                <FormField label="Priority" htmlFor="ai-priority"><Select defaultValue="standard"><SelectTrigger id="ai-priority" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="standard">Standard</SelectItem><SelectItem value="high">High</SelectItem></SelectContent></Select></FormField>
+                <FormField label="Schedule" htmlFor="ai-schedule"><Select defaultValue="now"><SelectTrigger id="ai-schedule" className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="now">Queue immediately</SelectItem><SelectItem value="afternoon">Today, 2:00 PM</SelectItem><SelectItem value="tomorrow">Tomorrow, 10:00 AM</SelectItem></SelectContent></Select></FormField>
+              </div>
+            </CreateOrderSection>
+          </form>
+
+          <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t bg-background p-4 sm:flex-row sm:justify-end">
+            <Button variant="ghost" type="button" onClick={() => setIsNewOrderOpen(false)}>Cancel</Button>
+            <Button variant="outline" type="button" onClick={() => setIsNewOrderOpen(false)}><Save data-icon="inline-start" />Save Draft</Button>
+            <Button type="button" onClick={() => setIsNewOrderOpen(false)}><Phone data-icon="inline-start" />Create &amp; Queue AI Call</Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
       <Sheet open={selectedOrder !== null} onOpenChange={(open) => !open && setSelectedOrder(null)}>
         <SheetContent className="w-full gap-0 overflow-y-auto p-0 sm:max-w-xl" side="right">
           {selectedOrder && (
@@ -306,4 +368,12 @@ function DetailCard({ title, icon: Icon, children }: { title: string; icon: type
 
 function DetailRow({ label, value, icon: Icon, valueClassName }: { label: string; value: React.ReactNode; icon?: typeof Phone; valueClassName?: string }) {
   return <div className="flex items-center justify-between gap-4 text-sm"><span className="flex shrink-0 items-center gap-2 text-muted-foreground">{Icon && <Icon className="size-3.5" />}{label}</span><span className={`min-w-0 text-right text-foreground ${valueClassName ?? ""}`}>{value}</span></div>;
+}
+
+function CreateOrderSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return <Card className="gap-4 py-0"><div className="border-b px-4 py-3"><h3 className="font-heading font-medium">{title}</h3></div><CardContent className="space-y-4 pb-4">{children}</CardContent></Card>;
+}
+
+function FormField({ label, htmlFor, children }: { label: string; htmlFor: string; children: React.ReactNode }) {
+  return <div className="grid gap-1.5"><label htmlFor={htmlFor} className="text-sm font-medium">{label}</label>{children}</div>;
 }
