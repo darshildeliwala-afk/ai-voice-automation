@@ -81,6 +81,11 @@ export interface ImportPreviewResult {
   totalRows: number;
   validRows: number;
   invalidRows: number;
+  processedRows: number;
+  successCount: number;
+  errorCount: number;
+  completedAt: Date | null;
+  errorMessage: string | null;
   sample: ImportPreviewRow[];
 }
 
@@ -294,6 +299,11 @@ export class ImportsService extends BaseService {
       totalRows: job.totalRows,
       validRows: job.validRows,
       invalidRows: job.invalidRows,
+      processedRows: job.processedRows,
+      successCount: job.successCount,
+      errorCount: job.errorCount,
+      completedAt: job.completedAt,
+      errorMessage: job.errorMessage,
       sample: rows.map((row) => ({
         rowNumber: row.rowNumber,
         rawData: row.rawData as Record<string, string>,

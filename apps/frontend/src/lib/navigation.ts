@@ -7,6 +7,7 @@ import {
   Plug,
   Settings,
   ShoppingCart,
+  UploadCloud,
   User,
   type LucideIcon,
 } from "lucide-react";
@@ -20,6 +21,7 @@ export type NavItem = {
 export const mainNavItems: NavItem[] = [
   { title: "Dashboard", href: "/", icon: LayoutDashboard },
   { title: "Orders", href: "/orders", icon: ShoppingCart },
+  { title: "Imports", href: "/imports", icon: UploadCloud },
   { title: "AI Agents", href: "/agents", icon: Bot },
   { title: "Call History", href: "/call-history", icon: Phone },
   { title: "Knowledge Base", href: "/knowledge-base", icon: BookOpen },
