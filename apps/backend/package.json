@@ -16,6 +16,7 @@
     "@nestjs/config": "latest",
     "@nestjs/core": "latest",
     "@nestjs/platform-express": "latest",
+    "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "latest",
     "class-transformer": "latest",
     "class-validator": "latest",
