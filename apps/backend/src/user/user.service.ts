@@ -21,6 +21,19 @@ export class UserService {
     });
   }
 
+  async findByEmail(email: string): Promise<User | null> {
+    return this.prisma.user.findFirst({
+      where: { email, deletedAt: null },
+    });
+  }
+
+  async updateLastLogin(id: string): Promise<User> {
+    return this.prisma.user.update({
+      where: { id },
+      data: { lastLoginAt: new Date() },
+    });
+  }
+
   async getUserById(id: string): Promise<User> {
     const user = await this.prisma.user.findFirst({
       where: { id, deletedAt: null },

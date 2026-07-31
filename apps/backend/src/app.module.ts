@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 
 import { AgentsModule } from "./agents/agents.module";
+import { AuthModule } from "./auth/auth.module";
 import { PrismaModule } from "./common/prisma/prisma.module";
 import { CustomersModule } from "./customers/customers.module";
 import { HealthModule } from "./health/health.module";
@@ -15,6 +16,7 @@ import { QueueModule } from "./queue/queue.module";
       cache: true,
     }),
     PrismaModule,
+    AuthModule,
     HealthModule,
     OrdersModule,
     CustomersModule,
