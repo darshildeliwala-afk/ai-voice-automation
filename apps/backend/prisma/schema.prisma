@@ -53,6 +53,22 @@ enum CallStatus {
   VOICEMAIL
 }
 
+enum ImportJobStatus {
+  UPLOADED
+  VALIDATED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ImportRowStatus {
+  PENDING
+  VALID
+  INVALID
+  IMPORTED
+  FAILED
+}
+
 model Workspace {
   id                     String                  @id @default(uuid()) @db.Uuid
   name                   String
@@ -269,16 +285,52 @@ model MarketplaceConnection {
 }
 
 model ImportJob {
-  id              String      @id @default(uuid()) @db.Uuid
-  workspaceId     String      @db.Uuid
-  source          Marketplace
-  sourceReference String?
-  completedAt     DateTime?
-  errorMessage    String?
-  metadata        Json?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  workspace       Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id               String          @id @default(uuid()) @db.Uuid
+  workspaceId      String          @db.Uuid
+  source           Marketplace
+  sourceReference  String?
+  status           ImportJobStatus @default(UPLOADED)
+  fileName         String
+  fileType         String
+  headers          Json
+  suggestedMapping Json
+  fieldMapping     Json?
+  totalRows        Int             @default(0)
+  validRows        Int             @default(0)
+  invalidRows      Int             @default(0)
+  processedRows    Int             @default(0)
+  successCount     Int             @default(0)
+  errorCount       Int             @default(0)
+  completedAt      DateTime?
+  errorMessage     String?
+  metadata         Json?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  workspace        Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  rows             ImportRow[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+}
+
+model ImportRow {
+  id          String          @id @default(uuid()) @db.Uuid
+  importJobId String          @db.Uuid
+  rowNumber   Int
+  rawData     Json
+  mappedData  Json?
+  groupKey    String?
+  status      ImportRowStatus @default(PENDING)
+  errors      Json?
+  customerId  String?         @db.Uuid
+  orderId     String?         @db.Uuid
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  importJob   ImportJob       @relation(fields: [importJobId], references: [id], onDelete: Cascade)
+
+  @@index([importJobId])
+  @@index([importJobId, status])
+  @@index([importJobId, groupKey])
 }
 
 model Automation {

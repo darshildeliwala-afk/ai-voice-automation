@@ -7,6 +7,7 @@ import { AuthModule } from "./auth/auth.module";
 import { PrismaModule } from "./common/prisma/prisma.module";
 import { CustomersModule } from "./customers/customers.module";
 import { HealthModule } from "./health/health.module";
+import { ImportsModule } from "./imports/imports.module";
 import { KnowledgeBaseModule } from "./knowledge-base/knowledge-base.module";
 import { OrdersModule } from "./orders/orders.module";
 import { QueueModule } from "./queue/queue.module";
@@ -25,6 +26,7 @@ import { QueueModule } from "./queue/queue.module";
     AgentsModule,
     AiAgentModule,
     KnowledgeBaseModule,
+    ImportsModule,
     QueueModule,
   ],
 })
