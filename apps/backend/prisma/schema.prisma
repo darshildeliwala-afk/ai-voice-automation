@@ -122,6 +122,7 @@ model Order {
   metadata           Json?
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
+  deletedAt          DateTime?
   workspace          Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   customer           Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items              OrderItem[]
@@ -131,6 +132,7 @@ model Order {
   @@index([customerId])
   @@index([marketplaceOrderId])
   @@index([status])
+  @@index([workspaceId, deletedAt])
 }
 
 model OrderItem {
