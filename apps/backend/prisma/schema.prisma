@@ -159,6 +159,14 @@ model AiAgent {
   knowledgeBaseId String?        @db.Uuid
   name            String
   description     String?
+  provider        String
+  model           String
+  voice           String
+  language        String
+  systemPrompt    String?
+  greeting        String?
+  temperature     Float          @default(0.7)
+  isActive        Boolean        @default(true)
   configuration   Json?
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
