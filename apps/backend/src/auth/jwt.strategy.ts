@@ -9,6 +9,13 @@ export interface JwtPayload {
   role: string;
 }
 
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  workspaceId: string;
+  role: string;
+}
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor() {
@@ -25,7 +32,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
-  validate(payload: JwtPayload): JwtPayload {
-    return payload;
+  validate(payload: JwtPayload): AuthenticatedUser {
+    return {
+      id: payload.sub,
+      email: payload.email,
+      workspaceId: payload.workspaceId,
+      role: payload.role,
+    };
   }
 }
