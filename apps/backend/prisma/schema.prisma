@@ -175,7 +175,7 @@ model AiAgent {
 model CallQueue {
   id           String      @id @default(uuid()) @db.Uuid
   orderId      String      @db.Uuid
-  aiAgentId    String      @db.Uuid
+  aiAgentId    String?     @db.Uuid
   status       QueueStatus @default(QUEUED)
   scheduledAt  DateTime?
   attemptCount Int         @default(0)
@@ -183,7 +183,7 @@ model CallQueue {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  aiAgent      AiAgent     @relation(fields: [aiAgentId], references: [id], onDelete: Restrict)
+  aiAgent      AiAgent?    @relation(fields: [aiAgentId], references: [id], onDelete: Restrict)
   calls        Call[]
 
   @@index([orderId])
