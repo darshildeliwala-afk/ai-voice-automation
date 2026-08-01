@@ -53,6 +53,21 @@ enum CallStatus {
   VOICEMAIL
 }
 
+enum TelephonyProvider {
+  TWILIO
+  EXOTEL
+  PLIVO
+  RETELL
+  VAPI
+}
+
+enum AiProvider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  AZURE_OPENAI
+}
+
 enum ImportJobStatus {
   UPLOADED
   VALIDATED
@@ -85,6 +100,9 @@ model Workspace {
   marketplaceConnections MarketplaceConnection[]
   importJobs             ImportJob[]
   automations            Automation[]
+  workspaceSettings      WorkspaceSettings?
+  telephonyConfigs       TelephonyConfig[]
+  aiProviderConfigs      AiProviderConfig[]
 
   @@index([deletedAt])
 }
@@ -351,4 +369,65 @@ model Automation {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([deletedAt])
+}
+
+/// Single source of truth for a workspace's general configuration. Future
+/// provider modules (Telephony, AI, Email, WhatsApp, SMS, Billing, ...)
+/// read their non-secret configuration from here.
+model WorkspaceSettings {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @unique @db.Uuid
+  timezone      String    @default("UTC")
+  businessName  String?
+  businessEmail String?
+  businessPhone String?
+  website       String?
+  logoUrl       String?
+  address       String?
+  currency      String    @default("INR") @db.VarChar(3)
+  language      String    @default("en")
+  businessHours Json?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// Telephony provider credentials for a workspace. `authToken` is encrypted
+/// at rest (see EncryptionService) and must never be returned by any API.
+/// Multiple rows may exist per workspace (history across provider
+/// switches); at most one is `isActive` at a time.
+model TelephonyConfig {
+  id            String            @id @default(uuid()) @db.Uuid
+  workspaceId   String            @db.Uuid
+  provider      TelephonyProvider
+  authId        String?
+  authToken     String
+  phoneNumber   String?
+  webhookSecret String?
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  workspace     Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+}
+
+/// AI provider credentials for a workspace. `apiKey` is encrypted at rest
+/// (see EncryptionService) and must never be returned by any API. Multiple
+/// rows may exist per workspace; at most one is `isActive` at a time.
+model AiProviderConfig {
+  id            String     @id @default(uuid()) @db.Uuid
+  workspaceId   String     @db.Uuid
+  provider      AiProvider
+  apiKey        String
+  defaultModel  String?
+  temperature   Float      @default(0.7)
+  isActive      Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  workspace     Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
 }

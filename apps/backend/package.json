@@ -9,7 +9,10 @@
     "start:prod": "node dist/main",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "test": "jest --config test/jest-unit.json",
+    "test:integration": "jest --config test/jest-integration.json --runInBand",
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand"
   },
   "dependencies": {
     "@nestjs/common": "latest",
@@ -37,11 +40,16 @@
     "@nestjs/testing": "latest",
     "@types/bcrypt": "^6.0.0",
     "@types/express": "latest",
+    "@types/jest": "^30.0.0",
     "@types/node": "latest",
     "@types/passport": "^1.0.17",
     "@types/passport-jwt": "^4.0.1",
+    "@types/supertest": "^7.2.1",
+    "jest": "^30.4.2",
     "prisma": "latest",
     "source-map-support": "latest",
+    "supertest": "^7.2.2",
+    "ts-jest": "^29.4.12",
     "ts-node": "latest",
     "tsconfig-paths": "latest",
     "tsx": "latest",

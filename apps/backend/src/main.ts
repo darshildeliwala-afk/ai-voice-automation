@@ -6,6 +6,8 @@ import { AppModule } from "./app.module";
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.enableShutdownHooks(["SIGTERM", "SIGINT"]);
+
   app.enableCors({
     origin: process.env.CORS_ORIGIN?.split(",") ?? "http://localhost:3000",
     credentials: true,

@@ -1,0 +1,12 @@
+{
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "testRegex": "test/e2e/.*\\.e2e-spec\\.ts$",
+  "setupFiles": ["dotenv/config"],
+  "transform": {
+    "^.+\\.(t|j)s$": ["ts-jest", { "tsconfig": "tsconfig.spec.json" }]
+  },
+  "testTimeout": 30000,
+  "forceExit": true
+}
