@@ -1,0 +1,43 @@
+// This schema intentionally mirrors only the slice of apps/backend's schema
+// that the worker needs (CallQueue). It points at the same database.
+// Migrations are owned by apps/backend — do NOT run `prisma migrate` here.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum QueueStatus {
+  QUEUED
+  SCHEDULED
+  CALLING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model CallQueue {
+  id           String      @id @default(uuid()) @db.Uuid
+  orderId      String      @db.Uuid
+  aiAgentId    String?     @db.Uuid
+  status       QueueStatus @default(QUEUED)
+  scheduledAt  DateTime?
+  attemptCount Int         @default(0)
+  lastError    String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  lockedAt     DateTime?
+  workerId     String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([orderId])
+  @@index([aiAgentId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([lockedAt])
+}

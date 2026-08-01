@@ -1,0 +1,8 @@
+# OS
+.DS_Store
+
+# Redis local dev snapshot (created if redis-server is launched from repo root)
+dump.rdb
+
+# Node
+node_modules

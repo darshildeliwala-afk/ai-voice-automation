@@ -204,6 +204,10 @@ model CallQueue {
   scheduledAt  DateTime?
   attemptCount Int         @default(0)
   lastError    String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  lockedAt     DateTime?
+  workerId     String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -214,6 +218,7 @@ model CallQueue {
   @@index([aiAgentId])
   @@index([status])
   @@index([scheduledAt])
+  @@index([lockedAt])
 }
 
 model Call {

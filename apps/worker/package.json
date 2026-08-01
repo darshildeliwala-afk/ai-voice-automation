@@ -1,0 +1,48 @@
+{
+  "name": "worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "nest build",
+    "start": "node dist/main",
+    "start:dev": "nest start --watch",
+    "start:prod": "node dist/main",
+    "prisma:generate": "prisma generate",
+    "test": "jest --config test/jest-unit.json",
+    "test:integration": "jest --config test/jest-integration.json --runInBand",
+    "test:e2e": "jest --config test/jest-e2e.json --runInBand"
+  },
+  "dependencies": {
+    "@nestjs/bullmq": "latest",
+    "@nestjs/common": "latest",
+    "@nestjs/config": "latest",
+    "@nestjs/core": "latest",
+    "@nestjs/platform-express": "latest",
+    "@nestjs/schedule": "latest",
+    "@nestjs/terminus": "latest",
+    "@prisma/adapter-pg": "latest",
+    "@prisma/client": "latest",
+    "bullmq": "latest",
+    "dotenv": "latest",
+    "ioredis": "latest",
+    "reflect-metadata": "latest",
+    "rxjs": "latest"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "latest",
+    "@nestjs/schematics": "latest",
+    "@nestjs/testing": "latest",
+    "@types/jest": "latest",
+    "@types/node": "latest",
+    "@types/supertest": "latest",
+    "jest": "latest",
+    "prisma": "latest",
+    "source-map-support": "latest",
+    "supertest": "latest",
+    "ts-jest": "latest",
+    "ts-node": "latest",
+    "tsconfig-paths": "latest",
+    "tsx": "latest",
+    "typescript": "^6.0.0"
+  }
+}
