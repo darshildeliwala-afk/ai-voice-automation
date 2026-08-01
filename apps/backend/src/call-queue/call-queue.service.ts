@@ -66,6 +66,30 @@ export class CallQueueService {
     });
   }
 
+  async findById(id: string): Promise<CallQueue> {
+    return this.getQueueItemById(id);
+  }
+
+  /**
+   * Fast-tracks a queue row so the poller-driven worker picks it up on its
+   * next tick instead of waiting for `scheduledAt`. A no-op if the row is
+   * already being processed (CALLING) -- used by the manual "call now" API
+   * path (POST /telephony/call) to trigger near-immediate dispatch without
+   * duplicating the worker's own claim/process state machine.
+   */
+  async expediteNow(queueId: string): Promise<CallQueue> {
+    const item = await this.getQueueItemById(queueId);
+
+    if (item.status === QueueStatus.CALLING) {
+      return item;
+    }
+
+    return this.prisma.callQueue.update({
+      where: { id: queueId },
+      data: { status: QueueStatus.QUEUED, scheduledAt: new Date() },
+    });
+  }
+
   private async getQueueItemById(id: string): Promise<CallQueue> {
     const item = await this.prisma.callQueue.findFirst({ where: { id } });
 

@@ -6,12 +6,13 @@ import { AiAgentModule } from "./ai-agent/ai-agent.module";
 import { AuthModule } from "./auth/auth.module";
 import { EncryptionModule } from "./common/encryption/encryption.module";
 import { PrismaModule } from "./common/prisma/prisma.module";
-import { CustomersModule } from "./customers/customers.module";
+import { CustomerModule } from "./customer/customer.module";
 import { HealthModule } from "./health/health.module";
 import { ImportsModule } from "./imports/imports.module";
 import { KnowledgeBaseModule } from "./knowledge-base/knowledge-base.module";
 import { OrdersModule } from "./orders/orders.module";
 import { QueueModule } from "./queue/queue.module";
+import { TelephonyModule } from "./telephony/telephony.module";
 import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings.module";
 
 @Module({
@@ -25,13 +26,14 @@ import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings
     AuthModule,
     HealthModule,
     OrdersModule,
-    CustomersModule,
+    CustomerModule,
     AgentsModule,
     AiAgentModule,
     KnowledgeBaseModule,
     ImportsModule,
     QueueModule,
     WorkspaceSettingsModule,
+    TelephonyModule,
   ],
 })
 export class AppModule {}

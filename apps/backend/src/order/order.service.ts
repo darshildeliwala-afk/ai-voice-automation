@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { Injectable } from "@nestjs/common";
 
 import { BaseService } from "../common/base/base.service";
 import type { PaginationDto } from "../common/pagination/pagination.dto";
@@ -29,15 +29,9 @@ export class OrderService extends BaseService {
   }
 
   async createOrder(dto: CreateOrderDto): Promise<OrderWithItems> {
-    const customer = await this.customerService.getCustomerById(
-      dto.customerId,
-    );
-
-    if (customer.workspaceId !== dto.workspaceId) {
-      throw new BadRequestException(
-        "Customer does not belong to the specified workspace",
-      );
-    }
+    // Scoped lookup: a customer in another workspace is treated as not
+    // found, so this also enforces that the customer belongs to dto.workspaceId.
+    await this.customerService.getCustomerById(dto.workspaceId, dto.customerId);
 
     const { items, ...orderData } = dto;
 

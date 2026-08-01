@@ -1,6 +1,10 @@
 // This schema intentionally mirrors only the slice of apps/backend's schema
-// that the worker needs (CallQueue). It points at the same database.
-// Migrations are owned by apps/backend — do NOT run `prisma migrate` here.
+// that the worker needs (CallQueue, Order, Customer, TelephonyConfig, Call).
+// It points at the same database. Migrations are owned by apps/backend —
+// do NOT run `prisma migrate` here. Mirrored models deliberately declare no
+// `@relation` fields to each other (matching the existing CallQueue
+// mirror) -- the worker resolves associations with separate, explicit
+// queries rather than Prisma `include`/nested writes.
 
 generator client {
   provider = "prisma-client"
@@ -18,6 +22,31 @@ enum QueueStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+enum TelephonyProvider {
+  TWILIO
+  EXOTEL
+  PLIVO
+  RETELL
+  VAPI
+}
+
+enum CallStatus {
+  INITIATED
+  RINGING
+  CONNECTED
+  COMPLETED
+  FAILED
+  NO_ANSWER
+  BUSY
+  CANCELLED
+  VOICEMAIL
+}
+
+enum CallDirection {
+  OUTBOUND
+  INBOUND
 }
 
 model CallQueue {
@@ -40,4 +69,76 @@ model CallQueue {
   @@index([status])
   @@index([scheduledAt])
   @@index([lockedAt])
+}
+
+/// Mirrors only the fields the worker needs to resolve a CallQueue row's
+/// workspace and customer. Source of truth: apps/backend's Order model.
+model Order {
+  id          String   @id @default(uuid()) @db.Uuid
+  workspaceId String   @db.Uuid
+  customerId  String   @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([customerId])
+}
+
+/// Mirrors only the fields the worker needs (the destination phone
+/// number). Source of truth: apps/backend's Customer model.
+model Customer {
+  id    String @id @default(uuid()) @db.Uuid
+  phone String
+}
+
+/// Mirrors apps/backend's TelephonyConfig. `authToken` is encrypted at rest
+/// -- decrypt via @ai-voice-automation/telephony-core's TelephonyEncryption,
+/// never persist or log the plaintext.
+model TelephonyConfig {
+  id            String            @id @default(uuid()) @db.Uuid
+  workspaceId   String            @db.Uuid
+  provider      TelephonyProvider
+  authId        String?
+  authToken     String
+  phoneNumber   String?
+  webhookSecret String?
+  isActive      Boolean           @default(true)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+}
+
+/// Mirrors apps/backend's (extended) Call model. The worker creates/updates
+/// rows here when it places the outbound call; apps/backend's webhook
+/// handler owns all subsequent lifecycle updates.
+model Call {
+  id              String            @id @default(uuid()) @db.Uuid
+  workspaceId     String            @db.Uuid
+  orderId         String            @db.Uuid
+  customerId      String            @db.Uuid
+  callQueueId     String            @db.Uuid
+  provider        TelephonyProvider
+  providerCallId  String?
+  phoneNumber     String
+  status          CallStatus
+  direction       CallDirection     @default(OUTBOUND)
+  startedAt       DateTime?
+  answeredAt      DateTime?
+  endedAt         DateTime?
+  durationSeconds Int?
+  recordingUrl    String?
+  hangupReason    String?
+  providerPayload Json?
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([workspaceId])
+  @@index([orderId])
+  @@index([customerId])
+  @@index([callQueueId])
+  @@index([startedAt])
+  @@index([providerCallId])
 }

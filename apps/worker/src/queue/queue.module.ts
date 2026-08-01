@@ -2,6 +2,7 @@ import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { ScheduleModule } from "@nestjs/schedule";
 
+import { EncryptionModule } from "../common/encryption/encryption.module";
 import { LoggerModule } from "../common/logger/logger.module";
 import { PrismaModule } from "../common/prisma/prisma.module";
 import { parseRedisUrl } from "../common/redis/redis-options.util";
@@ -11,7 +12,7 @@ import { CallQueueProcessor } from "./processors/call-queue.processor";
 import {
   CALL_PROCESSING_PROVIDER,
 } from "./providers/call-processing.provider.interface";
-import { StubCallProcessingProvider } from "./providers/stub-call-processing.provider";
+import { PlivoCallProcessingProvider } from "./providers/plivo-call-processing.provider";
 import { CALL_QUEUE_NAME } from "./queue.constants";
 import { CallQueueRepository } from "./repositories/call-queue.repository";
 import { CALL_QUEUE_REPOSITORY } from "./repositories/call-queue.repository.interface";
@@ -22,6 +23,7 @@ import { CallQueueWorkerService } from "./services/call-queue-worker.service";
     PrismaModule,
     LoggerModule,
     WorkerIdentityModule,
+    EncryptionModule,
     ScheduleModule.forRoot(),
     BullModule.forRootAsync({
       useFactory: () => ({
@@ -36,7 +38,7 @@ import { CallQueueWorkerService } from "./services/call-queue-worker.service";
     { provide: CALL_QUEUE_REPOSITORY, useClass: CallQueueRepository },
     {
       provide: CALL_PROCESSING_PROVIDER,
-      useClass: StubCallProcessingProvider,
+      useClass: PlivoCallProcessingProvider,
     },
     CallQueueWorkerService,
     CallQueueProducerService,

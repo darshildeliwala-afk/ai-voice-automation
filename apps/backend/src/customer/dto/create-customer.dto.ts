@@ -3,16 +3,12 @@ import {
   IsObject,
   IsOptional,
   IsString,
-  IsUUID,
   MinLength,
 } from "class-validator";
 
 import type { Prisma } from "../../generated/prisma/client";
 
 export class CreateCustomerDto {
-  @IsUUID()
-  workspaceId!: string;
-
   @IsString()
   @MinLength(1)
   name!: string;

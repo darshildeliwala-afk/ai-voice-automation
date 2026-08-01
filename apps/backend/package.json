@@ -15,6 +15,7 @@
     "test:e2e": "jest --config test/jest-e2e.json --runInBand"
   },
   "dependencies": {
+    "@ai-voice-automation/telephony-core": "*",
     "@nestjs/common": "latest",
     "@nestjs/config": "latest",
     "@nestjs/core": "latest",

@@ -26,37 +26,48 @@ export class CustomerService extends BaseService {
     super();
   }
 
-  async createCustomer(dto: CreateCustomerDto): Promise<Customer> {
-    await this.workspaceService.getWorkspaceById(dto.workspaceId);
-    await this.assertPhoneNotTaken(dto.workspaceId, dto.phone);
+  async createCustomer(
+    workspaceId: string,
+    dto: CreateCustomerDto,
+  ): Promise<Customer> {
+    await this.workspaceService.getWorkspaceById(workspaceId);
+    await this.assertPhoneNotTaken(workspaceId, dto.phone);
 
     return this.prisma.customer.create({
-      data: dto,
+      data: { ...dto, workspaceId },
     });
   }
 
-  async getCustomerById(id: string): Promise<Customer> {
-    const customer = this.throwIfNotFound(
+  /** Scoped to workspaceId -- a customer belonging to another workspace is treated as not found. */
+  async getCustomerById(workspaceId: string, id: string): Promise<Customer> {
+    return this.throwIfNotFound(
       await this.prisma.customer.findFirst({
-        where: this.applySoftDelete({ id }),
+        where: this.applySoftDelete({ id, workspaceId }),
       }),
       "Customer",
       id,
     );
-
-    await this.workspaceService.getWorkspaceById(customer.workspaceId);
-
-    return customer;
   }
 
   async listCustomers(
     workspaceId: string,
     pagination: PaginationDto,
+    search?: string,
   ): Promise<PaginatedCustomers> {
-    await this.workspaceService.getWorkspaceById(workspaceId);
-
     const { skip, take, orderBy } = this.buildPagination(pagination);
-    const where = this.applySoftDelete({ workspaceId });
+
+    const where: Prisma.CustomerWhereInput = this.applySoftDelete({
+      workspaceId,
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: Prisma.QueryMode.insensitive } },
+              { phone: { contains: search, mode: Prisma.QueryMode.insensitive } },
+              { email: { contains: search, mode: Prisma.QueryMode.insensitive } },
+            ],
+          }
+        : {}),
+    });
 
     const [data, total] = await Promise.all([
       this.prisma.customer.findMany({ where, skip, take, orderBy }),
@@ -66,30 +77,15 @@ export class CustomerService extends BaseService {
     return { data, meta: buildPaginationMeta(total, pagination) };
   }
 
-  async searchCustomers(workspaceId: string, query: string): Promise<Customer[]> {
-    await this.workspaceService.getWorkspaceById(workspaceId);
-
-    const where: Prisma.CustomerWhereInput = {
-      workspaceId,
-      deletedAt: null,
-      OR: [
-        { name: { contains: query, mode: Prisma.QueryMode.insensitive } },
-        { phone: { contains: query, mode: Prisma.QueryMode.insensitive } },
-        { email: { contains: query, mode: Prisma.QueryMode.insensitive } },
-      ],
-    };
-
-    return this.prisma.customer.findMany({ where });
-  }
-
   async updateCustomer(
+    workspaceId: string,
     id: string,
     dto: UpdateCustomerDto,
   ): Promise<Customer> {
-    const customer = await this.getCustomerById(id);
+    const customer = await this.getCustomerById(workspaceId, id);
 
     if (dto.phone && dto.phone !== customer.phone) {
-      await this.assertPhoneNotTaken(customer.workspaceId, dto.phone, id);
+      await this.assertPhoneNotTaken(workspaceId, dto.phone, id);
     }
 
     return this.prisma.customer.update({
@@ -98,8 +94,8 @@ export class CustomerService extends BaseService {
     });
   }
 
-  async softDeleteCustomer(id: string): Promise<Customer> {
-    await this.getCustomerById(id);
+  async softDeleteCustomer(workspaceId: string, id: string): Promise<Customer> {
+    await this.getCustomerById(workspaceId, id);
 
     return this.prisma.customer.update({
       where: { id },

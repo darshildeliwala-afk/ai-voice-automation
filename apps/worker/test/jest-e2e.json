@@ -16,6 +16,7 @@
       }
     ]
   },
+  "transformIgnorePatterns": ["node_modules", "packages/.*/dist/"],
   "testTimeout": 30000,
   "forceExit": true
 }

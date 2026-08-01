@@ -45,12 +45,20 @@ enum QueueStatus {
 }
 
 enum CallStatus {
+  INITIATED
   RINGING
   CONNECTED
+  COMPLETED
   FAILED
   NO_ANSWER
   BUSY
+  CANCELLED
   VOICEMAIL
+}
+
+enum CallDirection {
+  OUTBOUND
+  INBOUND
 }
 
 enum TelephonyProvider {
@@ -103,6 +111,7 @@ model Workspace {
   workspaceSettings      WorkspaceSettings?
   telephonyConfigs       TelephonyConfig[]
   aiProviderConfigs      AiProviderConfig[]
+  calls                  Call[]
 
   @@index([deletedAt])
 }
@@ -165,6 +174,7 @@ model Order {
   customer           Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items              OrderItem[]
   callQueue          CallQueue[]
+  calls              Call[]
 
   @@unique([workspaceId, marketplace, marketplaceOrderId])
   @@index([customerId])
@@ -240,24 +250,54 @@ model CallQueue {
 }
 
 model Call {
-  id              String      @id @default(uuid()) @db.Uuid
-  customerId      String      @db.Uuid
-  callQueueId     String      @db.Uuid
-  status          CallStatus
+  id              String            @id @default(uuid()) @db.Uuid
+  workspaceId     String            @db.Uuid
+  orderId         String            @db.Uuid
+  customerId      String            @db.Uuid
+  callQueueId     String            @db.Uuid
+  provider        TelephonyProvider
   providerCallId  String?
+  phoneNumber     String
+  status          CallStatus
+  direction       CallDirection     @default(OUTBOUND)
   startedAt       DateTime?
+  answeredAt      DateTime?
   endedAt         DateTime?
   durationSeconds Int?
   recordingUrl    String?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  customer        Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  callQueue       CallQueue   @relation(fields: [callQueueId], references: [id], onDelete: Cascade)
+  hangupReason    String?
+  providerPayload Json?
+  metadata        Json?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  order           Order             @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  callQueue       CallQueue         @relation(fields: [callQueueId], references: [id], onDelete: Cascade)
   transcript      Transcript?
 
+  @@index([workspaceId])
+  @@index([orderId])
   @@index([customerId])
   @@index([callQueueId])
   @@index([startedAt])
+  @@index([providerCallId])
+}
+
+/// Durable dedup record for provider webhook deliveries. Providers (Plivo
+/// included) may redeliver the same event on transient failures; a unique
+/// constraint on (provider, providerCallId, eventType) is the idempotency
+/// boundary -- a second delivery of the same lifecycle transition for the
+/// same call is recognized and ignored rather than double-applied.
+model TelephonyWebhookEvent {
+  id             String            @id @default(uuid()) @db.Uuid
+  provider       TelephonyProvider
+  providerCallId String
+  eventType      String
+  payload        Json
+  receivedAt     DateTime          @default(now())
+
+  @@unique([provider, providerCallId, eventType])
   @@index([providerCallId])
 }
 

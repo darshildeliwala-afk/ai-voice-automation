@@ -15,6 +15,7 @@
       }
     ]
   },
+  "transformIgnorePatterns": ["node_modules", "packages/.*/dist/"],
   "collectCoverageFrom": [
     "src/**/*.(t|j)s"
   ]

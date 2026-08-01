@@ -1,0 +1,23 @@
+{
+  "name": "@ai-voice-automation/telephony-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Provider-agnostic outbound telephony abstraction (call provider interface, Plivo implementation, credential decryption, webhook validation) shared by apps/backend and apps/worker.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "test": "jest --config jest.config.json"
+  },
+  "dependencies": {
+    "plivo": "latest"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "latest",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
+    "typescript": "^6.0.0"
+  }
+}
