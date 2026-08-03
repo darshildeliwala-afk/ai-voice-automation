@@ -15,45 +15,21 @@ jest.mock("openai", () => ({
 // eslint-disable-next-line import/first
 import { AiAgentService } from "../../src/ai-agent/ai-agent.service";
 // eslint-disable-next-line import/first
-import { AIProviderFactory } from "../../src/ai/providers/ai-provider.factory";
-// eslint-disable-next-line import/first
-import { PromptBuilderService } from "../../src/ai/prompt/prompt-builder.service";
-// eslint-disable-next-line import/first
-import { CallQueueService } from "../../src/call-queue/call-queue.service";
-// eslint-disable-next-line import/first
-import { EncryptionService } from "../../src/common/encryption/encryption.service";
-// eslint-disable-next-line import/first
 import { PrismaService } from "../../src/common/prisma/prisma.service";
 // eslint-disable-next-line import/first
 import { ConversationEngineService } from "../../src/conversation-engine/conversation-engine.service";
 // eslint-disable-next-line import/first
-import { AIToolExecutor } from "../../src/conversation-engine/tools/ai-tool-executor";
-// eslint-disable-next-line import/first
-import { AIToolRegistry } from "../../src/conversation-engine/tools/ai-tool-registry";
-// eslint-disable-next-line import/first
-import { CreateCallbackTool } from "../../src/conversation-engine/tools/create-callback.tool";
-// eslint-disable-next-line import/first
-import { EndCallTool } from "../../src/conversation-engine/tools/end-call.tool";
-// eslint-disable-next-line import/first
-import { LookupCustomerTool } from "../../src/conversation-engine/tools/lookup-customer.tool";
-// eslint-disable-next-line import/first
-import { LookupOrderTool } from "../../src/conversation-engine/tools/lookup-order.tool";
-// eslint-disable-next-line import/first
-import { SearchKnowledgeBaseTool } from "../../src/conversation-engine/tools/search-knowledge-base.tool";
-// eslint-disable-next-line import/first
-import { TransferToHumanTool } from "../../src/conversation-engine/tools/transfer-to-human.tool";
-// eslint-disable-next-line import/first
 import { CustomerService } from "../../src/customer/customer.service";
 // eslint-disable-next-line import/first
-import { KnowledgeBaseService } from "../../src/knowledge-base/knowledge-base.service";
+import { WorkflowNodeType } from "../../src/generated/prisma/client";
 // eslint-disable-next-line import/first
 import { OrderService } from "../../src/order/order.service";
 // eslint-disable-next-line import/first
+import { WorkflowService } from "../../src/workflow/workflow.service";
+// eslint-disable-next-line import/first
 import { AiProviderConfigService } from "../../src/workspace-settings/ai-provider-config.service";
 // eslint-disable-next-line import/first
-import { WorkspaceSettingsService } from "../../src/workspace-settings/workspace-settings.service";
-// eslint-disable-next-line import/first
-import { WorkspaceService } from "../../src/workspace/workspace.service";
+import { buildConversationEngineTestChain } from "./helpers/build-conversation-engine";
 
 function openAiResponse(
   overrides: Partial<{
@@ -88,6 +64,11 @@ function openAiResponse(
 describe("ConversationEngineService (integration, real Postgres)", () => {
   let prisma: PrismaService;
   let service: ConversationEngineService;
+  let workflowService: WorkflowService;
+  let customerService: CustomerService;
+  let orderService: OrderService;
+  let aiAgentService: AiAgentService;
+  let aiProviderConfigService: AiProviderConfigService;
   let workspaceId: string;
   let customerId: string;
   let orderId: string;
@@ -97,54 +78,13 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
     prisma = new PrismaService();
     await prisma.$connect();
 
-    const workspaceService = new WorkspaceService(prisma);
-    const customerService = new CustomerService(prisma, workspaceService);
-    const orderService = new OrderService(prisma, customerService);
-    const aiAgentService = new AiAgentService(prisma, workspaceService);
-    const knowledgeBaseService = new KnowledgeBaseService(prisma, workspaceService);
-    const encryptionService = new EncryptionService();
-    const workspaceSettingsService = new WorkspaceSettingsService(
-      prisma,
-      workspaceService,
-    );
-    const aiProviderConfigService = new AiProviderConfigService(
-      prisma,
-      workspaceService,
-      encryptionService,
-    );
-    const providerFactory = new AIProviderFactory(aiProviderConfigService);
-    const promptBuilder = new PromptBuilderService(
-      prisma,
-      workspaceSettingsService,
-      aiAgentService,
-      knowledgeBaseService,
-      customerService,
-      orderService,
-    );
-    const callQueueService = new CallQueueService(prisma);
-
-    const toolRegistry = new AIToolRegistry([
-      new LookupCustomerTool(customerService),
-      new LookupOrderTool(orderService),
-      new SearchKnowledgeBaseTool(knowledgeBaseService),
-      new EndCallTool(prisma),
-      new TransferToHumanTool(),
-      new CreateCallbackTool(callQueueService),
-    ]);
-    const toolExecutor = new AIToolExecutor(toolRegistry);
-
-    service = new ConversationEngineService(
-      prisma,
-      workspaceService,
-      customerService,
-      orderService,
-      aiAgentService,
-      providerFactory,
-      promptBuilder,
-      aiProviderConfigService,
-      toolRegistry,
-      toolExecutor,
-    );
+    const chain = buildConversationEngineTestChain(prisma);
+    service = chain.conversationEngine;
+    workflowService = chain.workflowService;
+    customerService = chain.customerService;
+    orderService = chain.orderService;
+    aiAgentService = chain.aiAgentService;
+    aiProviderConfigService = chain.aiProviderConfigService;
 
     workspaceId = randomUUID();
     await prisma.$executeRaw`
@@ -192,6 +132,8 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
   });
 
   afterAll(async () => {
+    await prisma.workflowNode.deleteMany({ where: { workflow: { workspaceId } } });
+    await prisma.workflow.deleteMany({ where: { workspaceId } });
     await prisma.callQueue.deleteMany({ where: { order: { workspaceId } } });
     await prisma.aIUsage.deleteMany({ where: { workspaceId } });
     await prisma.conversationMessage.deleteMany({
@@ -362,5 +304,175 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
     const queueItems = await prisma.callQueue.findMany({ where: { orderId } });
     expect(queueItems).toHaveLength(1);
     expect(queueItems[0].scheduledAt?.toISOString()).toBe(scheduledIso);
+  });
+
+  describe("custom published Workflow (Sprint 16 workflow engine)", () => {
+    // Each test binds its workflow to its own fresh AI Agent -- two
+    // simultaneously-active workflows sharing one aiAgentId would make
+    // resolveActiveGraph's pick between them non-deterministic.
+    async function createTestAgent(name: string): Promise<string> {
+      const agent = await aiAgentService.createAiAgent({
+        workspaceId,
+        name,
+        provider: "openai",
+        model: "gpt-4o-mini",
+        voice: "alloy",
+        language: "en",
+      } as never);
+      return agent.id;
+    }
+
+    it("executes PROMPT -> TOOL -> CONDITION -> HUMAN_TRANSFER for a PENDING order", async () => {
+      const agentId = await createTestAgent(`Human Transfer Agent ${randomUUID()}`);
+      const workflow = await workflowService.createWorkflow(workspaceId, {
+        aiAgentId: agentId,
+        slug: `human-transfer-flow-${randomUUID()}`,
+        name: "Human transfer flow",
+        entryNodeKey: "greet",
+        nodes: [
+          { key: "greet", type: WorkflowNodeType.PROMPT, config: { allowTools: false, next: "lookup" } },
+          { key: "lookup", type: WorkflowNodeType.TOOL, config: { toolName: "lookup_order", next: "route" } },
+          {
+            key: "route",
+            type: WorkflowNodeType.CONDITION,
+            config: {
+              field: "state.lookup.status",
+              operator: "equals",
+              value: "PENDING",
+              whenTrue: "transfer",
+              whenFalse: "wrap_up",
+            },
+          },
+          {
+            key: "transfer",
+            type: WorkflowNodeType.HUMAN_TRANSFER,
+            config: { reason: "Order still pending, needs human review" },
+          },
+          { key: "wrap_up", type: WorkflowNodeType.PROMPT, config: { allowTools: false } },
+        ],
+      });
+      const published = await workflowService.publish(workflow.id);
+      expect(published.status).toBe("PUBLISHED");
+      expect(published.isActive).toBe(true);
+
+      mockCreate.mockResolvedValueOnce(
+        openAiResponse({ content: "Let me check that for you." }),
+      );
+
+      const result = await service.processMessage({
+        workspaceId,
+        customerId,
+        orderId,
+        aiAgentId: agentId,
+        message: "What's happening with my order?",
+      });
+
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(result.content).toBe("Let me check that for you.");
+      expect(result.toolCallsExecuted).toEqual(["lookup_order", "transfer_to_human"]);
+
+      const conversation = await prisma.conversation.findUniqueOrThrow({
+        where: { id: result.conversationId },
+      });
+      expect(conversation.status).toBe("ACTIVE");
+
+      const messages = await prisma.conversationMessage.findMany({
+        where: { conversationId: result.conversationId },
+        orderBy: { createdAt: "asc" },
+      });
+      expect(messages.map((m) => m.role)).toEqual([
+        "USER",
+        "ASSISTANT",
+        "TOOL_CALL",
+        "TOOL_RESULT",
+        "TOOL_CALL",
+        "TOOL_RESULT",
+      ]);
+
+      const usageRows = await prisma.aIUsage.findMany({
+        where: { conversationId: result.conversationId },
+      });
+      expect(usageRows).toHaveLength(1);
+    });
+
+    it("executes PROMPT -> TOOL -> CONDITION -> END for a non-PENDING order, completing the conversation", async () => {
+      const agentId = await createTestAgent(`End Flow Agent ${randomUUID()}`);
+      const shippedOrder = await orderService.createOrder({
+        workspaceId,
+        customerId,
+        marketplace: "MANUAL" as never,
+        paymentType: "COD" as never,
+        totalAmount: 250,
+      });
+      await prisma.order.update({
+        where: { id: shippedOrder.id },
+        data: { status: "SHIPPED" as never },
+      });
+
+      const workflow = await workflowService.createWorkflow(workspaceId, {
+        aiAgentId: agentId,
+        slug: `end-flow-${randomUUID()}`,
+        name: "End flow",
+        entryNodeKey: "greet",
+        nodes: [
+          { key: "greet", type: WorkflowNodeType.PROMPT, config: { allowTools: false, next: "lookup" } },
+          { key: "lookup", type: WorkflowNodeType.TOOL, config: { toolName: "lookup_order", next: "route" } },
+          {
+            key: "route",
+            type: WorkflowNodeType.CONDITION,
+            config: {
+              field: "state.lookup.status",
+              operator: "equals",
+              value: "PENDING",
+              whenTrue: "transfer",
+              whenFalse: "wrap_up",
+            },
+          },
+          { key: "transfer", type: WorkflowNodeType.HUMAN_TRANSFER, config: {} },
+          { key: "wrap_up", type: WorkflowNodeType.END, config: { reason: "Order already shipped" } },
+        ],
+      });
+      await workflowService.publish(workflow.id);
+
+      mockCreate.mockResolvedValueOnce(
+        openAiResponse({ content: "Let me check that for you." }),
+      );
+
+      const result = await service.processMessage({
+        workspaceId,
+        customerId,
+        orderId: shippedOrder.id,
+        aiAgentId: agentId,
+        message: "What's happening with my order?",
+      });
+
+      expect(result.toolCallsExecuted).toEqual(["lookup_order", "end_call"]);
+
+      const conversation = await prisma.conversation.findUniqueOrThrow({
+        where: { id: result.conversationId },
+      });
+      expect(conversation.status).toBe("COMPLETED");
+    });
+
+    it("publishing a new workflow version deactivates the previously active version", async () => {
+      const slug = `versioned-flow-${randomUUID()}`;
+      const v1 = await workflowService.createWorkflow(workspaceId, {
+        slug,
+        name: "Versioned flow",
+        entryNodeKey: "end",
+        nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
+      });
+      await workflowService.publish(v1.id);
+
+      const v2 = await workflowService.createNewVersion(v1.id);
+      expect(v2.version).toBe(2);
+      await workflowService.publish(v2.id);
+
+      const versions = await workflowService.listVersions(workspaceId, slug);
+      const v1Reloaded = versions.find((v) => v.id === v1.id);
+      const v2Reloaded = versions.find((v) => v.id === v2.id);
+      expect(v1Reloaded?.isActive).toBe(false);
+      expect(v2Reloaded?.isActive).toBe(true);
+    });
   });
 });

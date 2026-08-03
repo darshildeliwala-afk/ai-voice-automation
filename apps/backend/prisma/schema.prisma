@@ -106,6 +106,21 @@ enum ImportRowStatus {
   FAILED
 }
 
+enum WorkflowStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum WorkflowNodeType {
+  PROMPT
+  CONDITION
+  TOOL
+  END
+  HUMAN_TRANSFER
+  CALLBACK
+}
+
 model Workspace {
   id                     String                  @id @default(uuid()) @db.Uuid
   name                   String
@@ -128,6 +143,7 @@ model Workspace {
   calls                  Call[]
   conversations          Conversation[]
   aiUsageRecords         AIUsage[]
+  workflows              Workflow[]
 
   @@index([deletedAt])
 }
@@ -237,6 +253,7 @@ model AiAgent {
   knowledgeBase   KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
   callQueue       CallQueue[]
   conversations   Conversation[]
+  workflows       Workflow[]
 
   @@index([workspaceId])
   @@index([knowledgeBaseId])
@@ -555,4 +572,57 @@ model AiProviderConfig {
 
   @@index([workspaceId])
   @@index([workspaceId, isActive])
+}
+
+/// A versioned AI Agent conversation workflow: a graph of WorkflowNodes the
+/// ConversationEngine executes instead of the fixed single-prompt loop.
+/// Rows are insert-only per version (never mutated once PUBLISHED), the
+/// same audit-preserving pattern as AiProviderConfig/TelephonyConfig --
+/// `slug` groups the versions of one named workflow together, and at most
+/// one PUBLISHED version per (workspaceId, slug) is `isActive` at a time.
+/// `aiAgentId` null means "workspace-wide default workflow" (used when an
+/// agent has no workflow of its own).
+model Workflow {
+  id           String           @id @default(uuid()) @db.Uuid
+  workspaceId  String           @db.Uuid
+  aiAgentId    String?          @db.Uuid
+  slug         String
+  name         String
+  description  String?
+  version      Int              @default(1)
+  status       WorkflowStatus   @default(DRAFT)
+  isActive     Boolean          @default(false)
+  entryNodeKey String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  aiAgent      AiAgent?         @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  nodes        WorkflowNode[]
+
+  @@unique([workspaceId, slug, version])
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+  @@index([aiAgentId])
+  @@index([workspaceId, deletedAt])
+}
+
+/// A single step in a Workflow's graph. `config` is a type-specific JSON
+/// blob (validated by WorkflowValidatorService, not the DB) that carries
+/// both the node's parameters and its outgoing transition(s) -- e.g. a
+/// PROMPT/TOOL/CALLBACK node's optional `next` key, or a CONDITION node's
+/// `whenTrue`/`whenFalse` keys. END and HUMAN_TRANSFER nodes are always
+/// structurally terminal (no transition in their config).
+model WorkflowNode {
+  id         String           @id @default(uuid()) @db.Uuid
+  workflowId String           @db.Uuid
+  key        String
+  type       WorkflowNodeType
+  config     Json
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  workflow   Workflow         @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@unique([workflowId, key])
+  @@index([workflowId])
 }

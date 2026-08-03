@@ -1,13 +1,9 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 
 import { AiAgentService } from "../ai-agent/ai-agent.service";
-import { estimateCost } from "../ai/pricing/ai-pricing";
 import { PromptBuilderService } from "../ai/prompt/prompt-builder.service";
 import { AIProviderFactory } from "../ai/providers/ai-provider.factory";
-import type {
-  ChatMessage,
-  ToolCallRequest,
-} from "../ai/interfaces/ai-provider.interface";
+import type { ChatMessage } from "../ai/interfaces/ai-provider.interface";
 import { BaseService } from "../common/base/base.service";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { CustomerService } from "../customer/customer.service";
@@ -15,15 +11,12 @@ import {
   ConversationRole,
   ConversationStatus,
   type AiProvider,
-  type Prisma,
 } from "../generated/prisma/client";
 import { OrderService } from "../order/order.service";
+import { WorkflowExecutionEngine } from "../workflow/engine/workflow-execution.engine";
+import { WorkflowService } from "../workflow/workflow.service";
 import { AiProviderConfigService } from "../workspace-settings/ai-provider-config.service";
 import { WorkspaceService } from "../workspace/workspace.service";
-import { AIToolExecutor } from "./tools/ai-tool-executor";
-import { AIToolRegistry } from "./tools/ai-tool-registry";
-
-const MAX_TOOL_ITERATIONS = 5;
 
 export interface ProcessMessageInput {
   workspaceId: string;
@@ -42,7 +35,7 @@ export interface ProcessMessageResult {
   content: string;
   provider: AiProvider;
   model: string;
-  /** Aggregated across every provider call made during this turn (a turn may involve several when tools are used). */
+  /** Aggregated across every provider call made during this turn (a turn may involve several across PROMPT nodes and tool-calling rounds). */
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
@@ -54,11 +47,15 @@ export interface ProcessMessageResult {
 /**
  * Sits between the Worker (via TelephonyWebhookService's call-answer
  * trigger -- apps/worker itself has no DB access to any of this, see the
- * Sprint 15 architecture note in telephony-webhook.service.ts) and the
- * Sprint 14 AI layer. Loads full conversation context, builds the prompt,
- * runs the tool-calling loop against the resolved provider, and persists
- * every message (user/assistant/tool-call/tool-result) plus one AIUsage
- * row per provider call.
+ * Sprint 15 architecture note in telephony-webhook.service.ts) and the AI
+ * layer. Loads full conversation context, builds the base prompt, then
+ * hands off to the Sprint 16 Workflow engine: resolves the AI Agent's
+ * active published Workflow (or the workspace default, or the built-in
+ * DEFAULT_WORKFLOW_GRAPH if neither is configured -- see
+ * WorkflowService.resolveActiveGraph) and executes it via
+ * WorkflowExecutionEngine, which walks the node graph instead of any
+ * hardcoded loop. Message/usage persistence now happens inside the
+ * workflow's node handlers (see src/workflow/engine/handlers).
  */
 @Injectable()
 export class ConversationEngineService extends BaseService {
@@ -71,8 +68,8 @@ export class ConversationEngineService extends BaseService {
     private readonly providerFactory: AIProviderFactory,
     private readonly promptBuilder: PromptBuilderService,
     private readonly aiProviderConfigService: AiProviderConfigService,
-    private readonly toolRegistry: AIToolRegistry,
-    private readonly toolExecutor: AIToolExecutor,
+    private readonly workflowService: WorkflowService,
+    private readonly workflowExecutionEngine: WorkflowExecutionEngine,
   ) {
     super();
   }
@@ -130,9 +127,9 @@ export class ConversationEngineService extends BaseService {
     // Load (or create) the Conversation.
     const conversation = await this.resolveConversation(input);
 
-    // Build the prompt (this internally loads AI Agent, Knowledge Base,
-    // Customer, Order, and previous conversation history and formats them
-    // into a single system prompt + prior-turn messages).
+    // Build the base prompt (this internally loads AI Agent, Knowledge
+    // Base, Customer, Order, and previous conversation history and
+    // formats them into a single system prompt + prior-turn messages).
     const { systemPrompt, history } = await this.promptBuilder.build({
       workspaceId: input.workspaceId,
       customerId: input.customerId,
@@ -153,139 +150,48 @@ export class ConversationEngineService extends BaseService {
       { role: "user", content: input.message },
     ];
 
-    const tools = this.toolRegistry.getToolDefinitions();
-    const toolContext = {
+    // Resolve and execute the workflow graph -- the AI Agent's own active
+    // published Workflow, the workspace default, or the built-in
+    // single-node default graph. The ConversationEngine always executes a
+    // workflow; there is no separate hardcoded code path.
+    const graph = await this.workflowService.resolveActiveGraph(
+      input.workspaceId,
+      input.aiAgentId,
+    );
+
+    const result = await this.workflowExecutionEngine.execute(graph, {
       workspaceId: input.workspaceId,
       customerId: input.customerId,
       conversationId: conversation.id,
       orderId: input.orderId,
       aiAgentId: input.aiAgentId,
-    };
-
-    const aggregate = {
-      promptTokens: 0,
-      completionTokens: 0,
-      totalTokens: 0,
-      estimatedCost: 0,
-    };
-    const toolCallsExecuted: string[] = [];
-    let finalContent = "";
-    let finalModel = "";
-
-    for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-      const callStartedAt = Date.now();
-      const completion = await provider.chat({ messages, tools });
-      const callLatencyMs = Date.now() - callStartedAt;
-
-      finalModel = completion.model;
-      const cost = estimateCost(
-        providerName,
-        completion.model,
-        completion.promptTokens,
-        completion.completionTokens,
-      );
-
-      aggregate.promptTokens += completion.promptTokens;
-      aggregate.completionTokens += completion.completionTokens;
-      aggregate.totalTokens += completion.totalTokens;
-      aggregate.estimatedCost += cost;
-
-      await this.prisma.aIUsage.create({
-        data: {
-          workspaceId: input.workspaceId,
-          conversationId: conversation.id,
-          provider: providerName,
-          model: completion.model,
-          promptTokens: completion.promptTokens,
-          completionTokens: completion.completionTokens,
-          totalTokens: completion.totalTokens,
-          estimatedCost: cost,
-          latencyMs: callLatencyMs,
-        },
-      });
-
-      if (!completion.toolCalls || completion.toolCalls.length === 0) {
-        finalContent = completion.content;
-        await this.persistMessage(
-          conversation.id,
-          ConversationRole.ASSISTANT,
-          finalContent,
-        );
-        break;
-      }
-
-      await this.persistMessage(
-        conversation.id,
-        ConversationRole.TOOL_CALL,
-        completion.content,
-        { toolCalls: completion.toolCalls },
-      );
-      messages.push({
-        role: "assistant",
-        content: completion.content,
-        toolCalls: completion.toolCalls,
-      });
-
-      let stopAfterThisRound = false;
-
-      for (const call of completion.toolCalls) {
-        const result = await this.executeToolCall(call, toolContext);
-        toolCallsExecuted.push(call.name);
-
-        await this.persistMessage(
-          conversation.id,
-          ConversationRole.TOOL_RESULT,
-          result.content,
-          { toolCallId: call.id, toolName: call.name },
-        );
-        messages.push({
-          role: "tool",
-          content: result.content,
-          toolCallId: call.id,
-        });
-
-        if (result.terminal) {
-          stopAfterThisRound = true;
-        }
-      }
-
-      if (stopAfterThisRound) {
-        finalContent = completion.content;
-        break;
-      }
-    }
+      provider,
+      providerName,
+      messages,
+      state: {},
+    });
 
     return {
       conversationId: conversation.id,
-      content: finalContent,
+      content: result.content,
       provider: providerName,
-      model: finalModel,
-      ...aggregate,
+      model: result.model,
+      promptTokens: result.promptTokens,
+      completionTokens: result.completionTokens,
+      totalTokens: result.totalTokens,
+      estimatedCost: result.estimatedCost,
       latencyMs: Date.now() - startedAt,
-      toolCallsExecuted,
+      toolCallsExecuted: result.toolCallsExecuted,
     };
-  }
-
-  private async executeToolCall(
-    call: ToolCallRequest,
-    context: Parameters<AIToolExecutor["execute"]>[1],
-  ) {
-    return this.toolExecutor.execute(call, context);
   }
 
   private async persistMessage(
     conversationId: string,
     role: ConversationRole,
     content: string,
-    metadata?: Record<string, unknown>,
   ): Promise<void> {
     await this.prisma.conversationMessage.create({
-      data: {
-        conversationId,
-        role,
-        content,
-        metadata: metadata as Prisma.InputJsonValue | undefined,
-      },
+      data: { conversationId, role, content },
     });
   }
 

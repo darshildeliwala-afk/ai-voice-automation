@@ -25,43 +25,11 @@ jest.mock("openai", () => ({
 }));
 
 // eslint-disable-next-line import/first
-import { AiAgentService } from "../../src/ai-agent/ai-agent.service";
-// eslint-disable-next-line import/first
-import { AIProviderFactory } from "../../src/ai/providers/ai-provider.factory";
-// eslint-disable-next-line import/first
-import { PromptBuilderService } from "../../src/ai/prompt/prompt-builder.service";
-// eslint-disable-next-line import/first
-import { CallQueueService } from "../../src/call-queue/call-queue.service";
-// eslint-disable-next-line import/first
 import { EncryptionService } from "../../src/common/encryption/encryption.service";
 // eslint-disable-next-line import/first
 import { PrismaService } from "../../src/common/prisma/prisma.service";
 // eslint-disable-next-line import/first
-import { AIToolExecutor } from "../../src/conversation-engine/tools/ai-tool-executor";
-// eslint-disable-next-line import/first
-import { AIToolRegistry } from "../../src/conversation-engine/tools/ai-tool-registry";
-// eslint-disable-next-line import/first
-import { CreateCallbackTool } from "../../src/conversation-engine/tools/create-callback.tool";
-// eslint-disable-next-line import/first
-import { EndCallTool } from "../../src/conversation-engine/tools/end-call.tool";
-// eslint-disable-next-line import/first
-import { LookupCustomerTool } from "../../src/conversation-engine/tools/lookup-customer.tool";
-// eslint-disable-next-line import/first
-import { LookupOrderTool } from "../../src/conversation-engine/tools/lookup-order.tool";
-// eslint-disable-next-line import/first
-import { SearchKnowledgeBaseTool } from "../../src/conversation-engine/tools/search-knowledge-base.tool";
-// eslint-disable-next-line import/first
-import { TransferToHumanTool } from "../../src/conversation-engine/tools/transfer-to-human.tool";
-// eslint-disable-next-line import/first
-import { ConversationEngineService } from "../../src/conversation-engine/conversation-engine.service";
-// eslint-disable-next-line import/first
-import { CustomerService } from "../../src/customer/customer.service";
-// eslint-disable-next-line import/first
-import { OrderService } from "../../src/order/order.service";
-// eslint-disable-next-line import/first
 import { CallStatus, QueueStatus } from "../../src/generated/prisma/client";
-// eslint-disable-next-line import/first
-import { KnowledgeBaseService } from "../../src/knowledge-base/knowledge-base.service";
 // eslint-disable-next-line import/first
 import { TelephonyProviderFactory } from "../../src/telephony/providers/telephony-provider.factory";
 // eslint-disable-next-line import/first
@@ -71,9 +39,9 @@ import { AiProviderConfigService } from "../../src/workspace-settings/ai-provide
 // eslint-disable-next-line import/first
 import { TelephonyConfigService } from "../../src/workspace-settings/telephony-config.service";
 // eslint-disable-next-line import/first
-import { WorkspaceSettingsService } from "../../src/workspace-settings/workspace-settings.service";
-// eslint-disable-next-line import/first
 import { WorkspaceService } from "../../src/workspace/workspace.service";
+// eslint-disable-next-line import/first
+import { buildConversationEngineTestChain } from "./helpers/build-conversation-engine";
 
 describe("TelephonyWebhookService (integration, real Postgres)", () => {
   let prisma: PrismaService;
@@ -88,11 +56,8 @@ describe("TelephonyWebhookService (integration, real Postgres)", () => {
     prisma = new PrismaService();
     await prisma.$connect();
 
-    const workspaceService = new WorkspaceService(prisma);
-    const customerService = new CustomerService(prisma, workspaceService);
-    const orderService = new OrderService(prisma, customerService);
-    const callQueueService = new CallQueueService(prisma);
     const encryptionService = new EncryptionService();
+    const workspaceService = new WorkspaceService(prisma);
     const telephonyConfigService = new TelephonyConfigService(
       prisma,
       workspaceService,
@@ -102,47 +67,12 @@ describe("TelephonyWebhookService (integration, real Postgres)", () => {
       telephonyConfigService,
     );
 
-    const aiAgentService = new AiAgentService(prisma, workspaceService);
-    const knowledgeBaseService = new KnowledgeBaseService(prisma, workspaceService);
-    const workspaceSettingsService = new WorkspaceSettingsService(
-      prisma,
-      workspaceService,
-    );
-    const aiProviderConfigService = new AiProviderConfigService(
-      prisma,
-      workspaceService,
-      encryptionService,
-    );
-    const aiProviderFactory = new AIProviderFactory(aiProviderConfigService);
-    const promptBuilder = new PromptBuilderService(
-      prisma,
-      workspaceSettingsService,
-      aiAgentService,
-      knowledgeBaseService,
+    const {
       customerService,
       orderService,
-    );
-    const toolRegistry = new AIToolRegistry([
-      new LookupCustomerTool(customerService),
-      new LookupOrderTool(orderService),
-      new SearchKnowledgeBaseTool(knowledgeBaseService),
-      new EndCallTool(prisma),
-      new TransferToHumanTool(),
-      new CreateCallbackTool(callQueueService),
-    ]);
-    const toolExecutor = new AIToolExecutor(toolRegistry);
-    const conversationEngine = new ConversationEngineService(
-      prisma,
-      workspaceService,
-      customerService,
-      orderService,
-      aiAgentService,
-      aiProviderFactory,
-      promptBuilder,
-      aiProviderConfigService,
-      toolRegistry,
-      toolExecutor,
-    );
+      callQueueService,
+      conversationEngine,
+    } = buildConversationEngineTestChain(prisma);
 
     webhookService = new TelephonyWebhookService(
       prisma,

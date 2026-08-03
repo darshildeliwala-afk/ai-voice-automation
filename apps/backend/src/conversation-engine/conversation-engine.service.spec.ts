@@ -7,9 +7,8 @@ const CUSTOMER_ID = "customer-1";
 
 function setup() {
   const conversation = { create: jest.fn(), findFirst: jest.fn() };
-  const conversationMessage = { create: jest.fn() };
-  const aIUsage = { create: jest.fn() };
-  const prisma = { conversation, conversationMessage, aIUsage };
+  const conversationMessage = { create: jest.fn().mockResolvedValue({}) };
+  const prisma = { conversation, conversationMessage };
 
   const workspaceService = {
     getWorkspaceById: jest.fn().mockResolvedValue({ id: WORKSPACE_ID }),
@@ -30,14 +29,7 @@ function setup() {
     }),
   };
 
-  const chat = jest.fn().mockResolvedValue({
-    content: "Hello! How can I help?",
-    model: "gpt-4o-mini",
-    promptTokens: 20,
-    completionTokens: 10,
-    totalTokens: 30,
-    rawResponse: {},
-  });
+  const chat = jest.fn();
   const providerFactory = {
     createForWorkspace: jest.fn().mockResolvedValue({ chat }),
   };
@@ -56,13 +48,22 @@ function setup() {
     }),
   };
 
-  const toolRegistry = {
-    getToolDefinitions: jest.fn().mockReturnValue([
-      { name: "lookup_order", description: "...", parameters: {} },
-    ]),
+  const graph = { entryNodeKey: "start", nodes: [{ key: "start", type: "PROMPT", config: {} }] };
+  const workflowService = {
+    resolveActiveGraph: jest.fn().mockResolvedValue(graph),
   };
-  const toolExecutor = {
-    execute: jest.fn().mockResolvedValue({ content: '{"ok":true}' }),
+  const workflowExecutionEngine = {
+    execute: jest.fn().mockResolvedValue({
+      content: "Hello! How can I help?",
+      toolCallsExecuted: [],
+      provider: "OPENAI",
+      model: "gpt-4o-mini",
+      promptTokens: 20,
+      completionTokens: 10,
+      totalTokens: 30,
+      estimatedCost: 0.001,
+      stepsExecuted: 1,
+    }),
   };
 
   const service = new ConversationEngineService(
@@ -74,8 +75,8 @@ function setup() {
     providerFactory as never,
     promptBuilder as never,
     aiProviderConfigService as never,
-    toolRegistry as never,
-    toolExecutor as never,
+    workflowService as never,
+    workflowExecutionEngine as never,
   );
 
   return {
@@ -83,7 +84,6 @@ function setup() {
     prisma,
     conversation,
     conversationMessage,
-    aIUsage,
     workspaceService,
     customerService,
     orderService,
@@ -92,14 +92,15 @@ function setup() {
     chat,
     promptBuilder,
     aiProviderConfigService,
-    toolRegistry,
-    toolExecutor,
+    workflowService,
+    workflowExecutionEngine,
+    graph,
   };
 }
 
 describe("ConversationEngineService", () => {
   describe("context loading / validation", () => {
-    it("validates the workspace, customer, order, and agent before doing any AI work", async () => {
+    it("validates the workspace, customer, order, and agent before resolving a provider or workflow", async () => {
       const {
         service,
         conversation,
@@ -108,6 +109,7 @@ describe("ConversationEngineService", () => {
         orderService,
         aiAgentService,
         providerFactory,
+        workflowService,
       } = setup();
       conversation.create.mockResolvedValue({ id: "conv-new" });
 
@@ -119,26 +121,17 @@ describe("ConversationEngineService", () => {
         message: "Hi",
       });
 
-      expect(workspaceService.getWorkspaceById).toHaveBeenCalledWith(
-        WORKSPACE_ID,
-      );
-      expect(customerService.getCustomerById).toHaveBeenCalledWith(
-        WORKSPACE_ID,
-        CUSTOMER_ID,
-      );
+      expect(workspaceService.getWorkspaceById).toHaveBeenCalledWith(WORKSPACE_ID);
+      expect(customerService.getCustomerById).toHaveBeenCalledWith(WORKSPACE_ID, CUSTOMER_ID);
       expect(orderService.getOrderById).toHaveBeenCalledWith("order-1");
       expect(aiAgentService.getAiAgentById).toHaveBeenCalledWith("agent-1");
-      expect(providerFactory.createForWorkspace).toHaveBeenCalledWith(
-        WORKSPACE_ID,
-      );
+      expect(providerFactory.createForWorkspace).toHaveBeenCalledWith(WORKSPACE_ID);
+      expect(workflowService.resolveActiveGraph).toHaveBeenCalledWith(WORKSPACE_ID, "agent-1");
     });
 
     it("throws NotFoundException when the order belongs to a different workspace", async () => {
       const { service, orderService } = setup();
-      orderService.getOrderById.mockResolvedValue({
-        id: "order-1",
-        workspaceId: "other-workspace",
-      });
+      orderService.getOrderById.mockResolvedValue({ id: "order-1", workspaceId: "other-workspace" });
 
       await expect(
         service.processMessage({
@@ -152,10 +145,7 @@ describe("ConversationEngineService", () => {
 
     it("throws NotFoundException when the AI agent belongs to a different workspace", async () => {
       const { service, aiAgentService } = setup();
-      aiAgentService.getAiAgentById.mockResolvedValue({
-        id: "agent-1",
-        workspaceId: "other-workspace",
-      });
+      aiAgentService.getAiAgentById.mockResolvedValue({ id: "agent-1", workspaceId: "other-workspace" });
 
       await expect(
         service.processMessage({
@@ -174,11 +164,7 @@ describe("ConversationEngineService", () => {
       );
 
       await expect(
-        service.processMessage({
-          workspaceId: WORKSPACE_ID,
-          customerId: CUSTOMER_ID,
-          message: "Hi",
-        }),
+        service.processMessage({ workspaceId: WORKSPACE_ID, customerId: CUSTOMER_ID, message: "Hi" }),
       ).rejects.toThrow();
 
       expect(conversation.create).not.toHaveBeenCalled();
@@ -246,9 +232,9 @@ describe("ConversationEngineService", () => {
     });
   });
 
-  describe("no tool calls (plain reply)", () => {
-    it("sends system+history+new-message to the provider and persists user+assistant messages", async () => {
-      const { service, conversation, conversationMessage, chat, promptBuilder } =
+  describe("workflow execution", () => {
+    it("persists the USER message and hands system+history+user messages to the workflow engine", async () => {
+      const { service, conversation, conversationMessage, promptBuilder, workflowExecutionEngine, graph } =
         setup();
       conversation.create.mockResolvedValue({ id: "conv-new" });
       promptBuilder.build.mockResolvedValue({
@@ -259,60 +245,33 @@ describe("ConversationEngineService", () => {
       await service.processMessage({
         workspaceId: WORKSPACE_ID,
         customerId: CUSTOMER_ID,
+        orderId: "order-1",
+        aiAgentId: "agent-1",
         message: "Hi there",
       });
 
-      expect(chat).toHaveBeenCalledWith({
+      expect(conversationMessage.create).toHaveBeenCalledWith({
+        data: { conversationId: "conv-new", role: "USER", content: "Hi there" },
+      });
+
+      expect(workflowExecutionEngine.execute).toHaveBeenCalledWith(graph, {
+        workspaceId: WORKSPACE_ID,
+        customerId: CUSTOMER_ID,
+        conversationId: "conv-new",
+        orderId: "order-1",
+        aiAgentId: "agent-1",
+        provider: expect.any(Object),
+        providerName: "OPENAI",
         messages: [
           { role: "system", content: "sys" },
           { role: "user", content: "earlier" },
           { role: "user", content: "Hi there" },
         ],
-        tools: [{ name: "lookup_order", description: "...", parameters: {} }],
-      });
-
-      expect(conversationMessage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          conversationId: "conv-new",
-          role: "USER",
-          content: "Hi there",
-        }),
-      });
-      expect(conversationMessage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          conversationId: "conv-new",
-          role: "ASSISTANT",
-          content: "Hello! How can I help?",
-        }),
+        state: {},
       });
     });
 
-    it("persists exactly one AIUsage row with provider/model/tokens/cost/latency", async () => {
-      const { service, conversation, aIUsage } = setup();
-      conversation.create.mockResolvedValue({ id: "conv-new" });
-
-      await service.processMessage({
-        workspaceId: WORKSPACE_ID,
-        customerId: CUSTOMER_ID,
-        message: "Hi",
-      });
-
-      expect(aIUsage.create).toHaveBeenCalledTimes(1);
-      expect(aIUsage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          workspaceId: WORKSPACE_ID,
-          conversationId: "conv-new",
-          provider: "OPENAI",
-          model: "gpt-4o-mini",
-          promptTokens: 20,
-          completionTokens: 10,
-          totalTokens: 30,
-          latencyMs: expect.any(Number),
-        }),
-      });
-    });
-
-    it("returns the final content, aggregated usage, and latencyMs", async () => {
+    it("returns the workflow engine's result mapped into ProcessMessageResult", async () => {
       const { service, conversation } = setup();
       conversation.create.mockResolvedValue({ id: "conv-new" });
 
@@ -330,195 +289,35 @@ describe("ConversationEngineService", () => {
         promptTokens: 20,
         completionTokens: 10,
         totalTokens: 30,
+        estimatedCost: 0.001,
         toolCallsExecuted: [],
       });
-      expect(result.estimatedCost).toBeGreaterThan(0);
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
     });
-  });
 
-  describe("tool-calling loop", () => {
-    it("executes a single tool call, feeds the result back, and persists TOOL_CALL + TOOL_RESULT messages", async () => {
-      const { service, conversation, conversationMessage, chat, toolExecutor } =
-        setup();
+    it("propagates toolCallsExecuted from the workflow engine's result", async () => {
+      const { service, conversation, workflowExecutionEngine } = setup();
       conversation.create.mockResolvedValue({ id: "conv-new" });
-      chat
-        .mockResolvedValueOnce({
-          content: "",
-          model: "gpt-4o-mini",
-          promptTokens: 15,
-          completionTokens: 5,
-          totalTokens: 20,
-          rawResponse: {},
-          toolCalls: [
-            { id: "call_1", name: "lookup_order", arguments: { orderId: "o1" } },
-          ],
-        })
-        .mockResolvedValueOnce({
-          content: "Your order has shipped.",
-          model: "gpt-4o-mini",
-          promptTokens: 25,
-          completionTokens: 8,
-          totalTokens: 33,
-          rawResponse: {},
-        });
+      workflowExecutionEngine.execute.mockResolvedValue({
+        content: "Your order shipped.",
+        toolCallsExecuted: ["lookup_order"],
+        provider: "OPENAI",
+        model: "gpt-4o-mini",
+        promptTokens: 40,
+        completionTokens: 15,
+        totalTokens: 55,
+        estimatedCost: 0.002,
+        stepsExecuted: 2,
+      });
 
       const result = await service.processMessage({
         workspaceId: WORKSPACE_ID,
         customerId: CUSTOMER_ID,
-        orderId: "o1",
-        message: "What's my order status?",
+        message: "Where's my order?",
       });
 
-      expect(chat).toHaveBeenCalledTimes(2);
-      expect(toolExecutor.execute).toHaveBeenCalledWith(
-        { id: "call_1", name: "lookup_order", arguments: { orderId: "o1" } },
-        expect.objectContaining({
-          workspaceId: WORKSPACE_ID,
-          customerId: CUSTOMER_ID,
-          conversationId: "conv-new",
-        }),
-      );
-
-      expect(conversationMessage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          conversationId: "conv-new",
-          role: "TOOL_CALL",
-        }),
-      });
-      expect(conversationMessage.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          conversationId: "conv-new",
-          role: "TOOL_RESULT",
-          content: '{"ok":true}',
-        }),
-      });
-
-      expect(result.content).toBe("Your order has shipped.");
       expect(result.toolCallsExecuted).toEqual(["lookup_order"]);
-    });
-
-    it("aggregates token usage/cost across every provider call made during the turn", async () => {
-      const { service, conversation, chat, aIUsage } = setup();
-      conversation.create.mockResolvedValue({ id: "conv-new" });
-      chat
-        .mockResolvedValueOnce({
-          content: "",
-          model: "gpt-4o-mini",
-          promptTokens: 15,
-          completionTokens: 5,
-          totalTokens: 20,
-          rawResponse: {},
-          toolCalls: [{ id: "call_1", name: "lookup_order", arguments: {} }],
-        })
-        .mockResolvedValueOnce({
-          content: "Done.",
-          model: "gpt-4o-mini",
-          promptTokens: 25,
-          completionTokens: 8,
-          totalTokens: 33,
-          rawResponse: {},
-        });
-
-      const result = await service.processMessage({
-        workspaceId: WORKSPACE_ID,
-        customerId: CUSTOMER_ID,
-        message: "Hi",
-      });
-
-      expect(aIUsage.create).toHaveBeenCalledTimes(2);
-      expect(result.promptTokens).toBe(40);
-      expect(result.completionTokens).toBe(13);
-      expect(result.totalTokens).toBe(53);
-    });
-
-    it("executes multiple parallel tool calls from a single completion", async () => {
-      const { service, conversation, chat, toolExecutor } = setup();
-      conversation.create.mockResolvedValue({ id: "conv-new" });
-      chat
-        .mockResolvedValueOnce({
-          content: "",
-          model: "gpt-4o-mini",
-          promptTokens: 1,
-          completionTokens: 1,
-          totalTokens: 2,
-          rawResponse: {},
-          toolCalls: [
-            { id: "call_1", name: "lookup_customer", arguments: {} },
-            { id: "call_2", name: "lookup_order", arguments: {} },
-          ],
-        })
-        .mockResolvedValueOnce({
-          content: "Here's what I found.",
-          model: "gpt-4o-mini",
-          promptTokens: 1,
-          completionTokens: 1,
-          totalTokens: 2,
-          rawResponse: {},
-        });
-
-      const result = await service.processMessage({
-        workspaceId: WORKSPACE_ID,
-        customerId: CUSTOMER_ID,
-        message: "Hi",
-      });
-
-      expect(toolExecutor.execute).toHaveBeenCalledTimes(2);
-      expect(result.toolCallsExecuted).toEqual([
-        "lookup_customer",
-        "lookup_order",
-      ]);
-    });
-
-    it("stops the loop immediately when a tool result is terminal (e.g. end_call)", async () => {
-      const { service, conversation, chat, toolExecutor } = setup();
-      conversation.create.mockResolvedValue({ id: "conv-new" });
-      toolExecutor.execute.mockResolvedValue({
-        content: '{"ended":true}',
-        terminal: true,
-      });
-      chat.mockResolvedValueOnce({
-        content: "Goodbye!",
-        model: "gpt-4o-mini",
-        promptTokens: 1,
-        completionTokens: 1,
-        totalTokens: 2,
-        rawResponse: {},
-        toolCalls: [{ id: "call_1", name: "end_call", arguments: {} }],
-      });
-
-      const result = await service.processMessage({
-        workspaceId: WORKSPACE_ID,
-        customerId: CUSTOMER_ID,
-        message: "Bye",
-      });
-
-      expect(chat).toHaveBeenCalledTimes(1);
-      expect(result.content).toBe("Goodbye!");
-      expect(result.toolCallsExecuted).toEqual(["end_call"]);
-    });
-
-    it("stops after MAX_TOOL_ITERATIONS even if the model keeps requesting tools", async () => {
-      const { service, conversation, chat } = setup();
-      conversation.create.mockResolvedValue({ id: "conv-new" });
-      chat.mockResolvedValue({
-        content: "",
-        model: "gpt-4o-mini",
-        promptTokens: 1,
-        completionTokens: 1,
-        totalTokens: 2,
-        rawResponse: {},
-        toolCalls: [{ id: "call_x", name: "lookup_order", arguments: {} }],
-      });
-
-      await service.processMessage({
-        workspaceId: WORKSPACE_ID,
-        customerId: CUSTOMER_ID,
-        message: "Hi",
-      });
-
-      // MAX_TOOL_ITERATIONS = 5 -- the loop must not run forever.
-      expect(chat).toHaveBeenCalledTimes(5);
+      expect(result.totalTokens).toBe(55);
     });
   });
 });

@@ -15,6 +15,7 @@ import { KnowledgeBaseModule } from "./knowledge-base/knowledge-base.module";
 import { OrdersModule } from "./orders/orders.module";
 import { QueueModule } from "./queue/queue.module";
 import { TelephonyModule } from "./telephony/telephony.module";
+import { WorkflowModule } from "./workflow/workflow.module";
 import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings.module";
 
 @Module({
@@ -37,6 +38,7 @@ import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings
     WorkspaceSettingsModule,
     TelephonyModule,
     AiModule,
+    WorkflowModule,
     ConversationEngineModule,
   ],
 })
