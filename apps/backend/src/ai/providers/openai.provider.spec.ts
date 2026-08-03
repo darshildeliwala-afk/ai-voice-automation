@@ -150,4 +150,218 @@ describe("OpenAIProvider", () => {
       provider.chat({ messages: [{ role: "user", content: "Hi" }] }),
     ).rejects.toThrow(AIProviderApiError);
   });
+
+  describe("tool calling", () => {
+    it("passes tool definitions to the API in OpenAI's function-tool shape", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      await provider.chat({
+        messages: [{ role: "user", content: "What's my order status?" }],
+        tools: [
+          {
+            name: "lookup_order",
+            description: "Looks up an order",
+            parameters: { type: "object", properties: {} },
+          },
+        ],
+      });
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "lookup_order",
+                description: "Looks up an order",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
+        }),
+      );
+    });
+
+    it("parses tool_calls from the response into ToolCallRequest[]", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    name: "lookup_order",
+                    arguments: '{"orderId":"order-1"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      const result = await provider.chat({
+        messages: [{ role: "user", content: "What's my order status?" }],
+        tools: [
+          {
+            name: "lookup_order",
+            description: "Looks up an order",
+            parameters: {},
+          },
+        ],
+      });
+
+      expect(result.content).toBe("");
+      expect(result.toolCalls).toEqual([
+        { id: "call_1", name: "lookup_order", arguments: { orderId: "order-1" } },
+      ]);
+    });
+
+    it("parses multiple parallel tool calls from a single response", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "lookup_customer", arguments: "{}" },
+                },
+                {
+                  id: "call_2",
+                  type: "function",
+                  function: { name: "lookup_order", arguments: '{"orderId":"o1"}' },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      const result = await provider.chat({
+        messages: [{ role: "user", content: "hi" }],
+      });
+
+      expect(result.toolCalls).toHaveLength(2);
+      expect(result.toolCalls?.map((c) => c.name)).toEqual([
+        "lookup_customer",
+        "lookup_order",
+      ]);
+    });
+
+    it("falls back to an empty args object when the model returns invalid JSON arguments", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: { name: "lookup_order", arguments: "{not valid json" },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      const result = await provider.chat({
+        messages: [{ role: "user", content: "hi" }],
+      });
+
+      expect(result.toolCalls).toEqual([
+        { id: "call_1", name: "lookup_order", arguments: {} },
+      ]);
+    });
+
+    it("omits toolCalls entirely when the model does not request any", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [{ message: { content: "Just a normal reply" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      const result = await provider.chat({
+        messages: [{ role: "user", content: "hi" }],
+      });
+
+      expect(result.toolCalls).toBeUndefined();
+    });
+
+    it("sends an assistant message with tool_calls and a tool-result message correctly on a follow-up turn", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [{ message: { content: "Your order ships tomorrow." } }],
+        usage: { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      await provider.chat({
+        messages: [
+          { role: "user", content: "What's my order status?" },
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [
+              { id: "call_1", name: "lookup_order", arguments: { orderId: "o1" } },
+            ],
+          },
+          {
+            role: "tool",
+            content: '{"status":"SHIPPED"}',
+            toolCallId: "call_1",
+          },
+        ],
+      });
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messages: [
+            { role: "user", content: "What's my order status?" },
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "call_1",
+                  type: "function",
+                  function: {
+                    name: "lookup_order",
+                    arguments: '{"orderId":"o1"}',
+                  },
+                },
+              ],
+            },
+            {
+              role: "tool",
+              content: '{"status":"SHIPPED"}',
+              tool_call_id: "call_1",
+            },
+          ],
+        }),
+      );
+    });
+  });
 });

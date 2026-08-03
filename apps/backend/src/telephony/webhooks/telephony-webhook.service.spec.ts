@@ -33,12 +33,19 @@ function setup() {
   const providerFactory = {
     createForWorkspace: jest.fn().mockResolvedValue(fakeProvider),
   };
-  const callQueueService = { complete: jest.fn() };
+  const callQueueService = {
+    complete: jest.fn(),
+    findById: jest.fn().mockResolvedValue({ id: "queue-1", aiAgentId: null }),
+  };
+  const conversationEngine = {
+    processMessage: jest.fn().mockResolvedValue({ conversationId: "conv-1" }),
+  };
 
   const service = new TelephonyWebhookService(
     prisma as never,
     providerFactory as never,
     callQueueService as never,
+    conversationEngine as never,
   );
 
   return {
@@ -49,6 +56,7 @@ function setup() {
     fakeProvider,
     providerFactory,
     callQueueService,
+    conversationEngine,
   };
 }
 
@@ -359,6 +367,111 @@ describe("TelephonyWebhookService", () => {
           data: expect.objectContaining({
             recordingUrl: "https://plivo.example/recording.mp3",
           }),
+        }),
+      );
+    });
+  });
+
+  describe("conversation engine trigger (Sprint 15 worker integration)", () => {
+    it("triggers the conversation engine on the first CONNECTED event", async () => {
+      const { service, call, callQueueService, conversationEngine, fakeProvider } =
+        setup();
+      call.findFirst.mockResolvedValue(
+        baseCallRow({
+          workspaceId: WORKSPACE_ID,
+          customerId: "customer-1",
+          orderId: "order-1",
+          answeredAt: null,
+        }),
+      );
+      callQueueService.findById.mockResolvedValue({
+        id: "queue-1",
+        aiAgentId: "agent-1",
+      });
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(
+        baseEvent({ status: CallStatus.CONNECTED }),
+      );
+
+      await service.processWebhook({
+        callId: CALL_ID,
+        type: "answer",
+        url: "https://example.com/telephony/webhook",
+        headers: {},
+        body: {},
+      });
+
+      expect(callQueueService.findById).toHaveBeenCalledWith("queue-1");
+      expect(conversationEngine.processMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: WORKSPACE_ID,
+          customerId: "customer-1",
+          orderId: "order-1",
+          aiAgentId: "agent-1",
+          callId: CALL_ID,
+        }),
+      );
+    });
+
+    it("does not trigger the conversation engine on a non-first-connect event (e.g. RINGING)", async () => {
+      const { service, call, conversationEngine, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(baseCallRow({ answeredAt: null }));
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(
+        baseEvent({ status: CallStatus.RINGING }),
+      );
+
+      await service.processWebhook({
+        callId: CALL_ID,
+        type: "answer",
+        url: "https://example.com/telephony/webhook",
+        headers: {},
+        body: {},
+      });
+
+      expect(conversationEngine.processMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not re-trigger on a second CONNECTED event for the same call", async () => {
+      const { service, call, conversationEngine, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(
+        baseCallRow({ answeredAt: new Date() }),
+      );
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(
+        baseEvent({ status: CallStatus.CONNECTED }),
+      );
+
+      await service.processWebhook({
+        callId: CALL_ID,
+        type: "answer",
+        url: "https://example.com/telephony/webhook",
+        headers: {},
+        body: {},
+      });
+
+      expect(conversationEngine.processMessage).not.toHaveBeenCalled();
+    });
+
+    it("does not let a conversation-engine failure break webhook processing", async () => {
+      const { service, call, conversationEngine, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(baseCallRow({ answeredAt: null }));
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(
+        baseEvent({ status: CallStatus.CONNECTED }),
+      );
+      conversationEngine.processMessage.mockRejectedValue(
+        new Error("AI provider exploded"),
+      );
+
+      const result = await service.processWebhook({
+        callId: CALL_ID,
+        type: "answer",
+        url: "https://example.com/telephony/webhook",
+        headers: {},
+        body: {},
+      });
+
+      expect(result).toEqual({ contentType: "text/xml", body: "<Response/>" });
+      expect(call.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: CallStatus.CONNECTED }),
         }),
       );
     });

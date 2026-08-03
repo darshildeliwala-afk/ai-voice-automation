@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 
 import { CallQueueModule } from "../call-queue/call-queue.module";
+import { ConversationEngineModule } from "../conversation-engine/conversation-engine.module";
 import { CustomerModule } from "../customer/customer.module";
 import { OrderModule } from "../order/order.module";
 import { WorkspaceSettingsModule } from "../workspace-settings/workspace-settings.module";
@@ -16,6 +17,7 @@ import { TelephonyWebhookService } from "./webhooks/telephony-webhook.service";
     OrderModule,
     CustomerModule,
     CallQueueModule,
+    ConversationEngineModule,
   ],
   controllers: [TelephonyController, TelephonyWebhookController],
   providers: [TelephonyService, TelephonyProviderFactory, TelephonyWebhookService],

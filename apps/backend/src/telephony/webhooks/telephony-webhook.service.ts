@@ -11,12 +11,22 @@ import type {
 
 import { CallQueueService } from "../../call-queue/call-queue.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
+import { ConversationEngineService } from "../../conversation-engine/conversation-engine.service";
 import {
   CallStatus,
   Prisma,
   type Call,
 } from "../../generated/prisma/client";
 import { TelephonyProviderFactory } from "../providers/telephony-provider.factory";
+
+/**
+ * Synthetic first turn sent to the conversation engine when a call
+ * connects. There is no live audio bridge yet (voice streaming is Sprint
+ * 16, so there is no real customer utterance to pass along) -- this
+ * prompts the AI agent to open with its configured greeting/context.
+ */
+const CALL_CONNECTED_TRIGGER_MESSAGE =
+  "(The customer has just answered the call. Greet them and begin the conversation.)";
 
 export interface WebhookRequestContext {
   callId: string;
@@ -42,6 +52,7 @@ export class TelephonyWebhookService {
     private readonly prisma: PrismaService,
     private readonly providerFactory: TelephonyProviderFactory,
     private readonly callQueueService: CallQueueService,
+    private readonly conversationEngine: ConversationEngineService,
   ) {}
 
   /**
@@ -190,8 +201,46 @@ export class TelephonyWebhookService {
       },
     });
 
+    if (isFirstConnect) {
+      await this.triggerConversationEngine(call);
+    }
+
     if (isTerminal) {
       await this.callQueueService.complete(call.callQueueId);
+    }
+  }
+
+  /**
+   * Worker Integration (Sprint 15): apps/worker itself has no DB access to
+   * Conversation/AiAgent/AiProviderConfig (only a minimal mirrored schema
+   * for placing the call -- see apps/worker/prisma/schema.prisma) and no
+   * voice-streaming bridge exists yet to carry a real customer utterance
+   * (Sprint 16). This call-answer event is the one real "the call is now
+   * live" signal that already exists, and it runs in the same app/process
+   * as the AI layer -- so it's where the conversation engine is invoked
+   * instead of apps/worker calling it directly. Failures here are caught
+   * and logged, never allowed to break call-lifecycle tracking (the
+   * webhook's primary responsibility) or the response back to the provider.
+   */
+  private async triggerConversationEngine(call: Call): Promise<void> {
+    try {
+      const queueItem = await this.callQueueService.findById(
+        call.callQueueId,
+      );
+
+      await this.conversationEngine.processMessage({
+        workspaceId: call.workspaceId,
+        customerId: call.customerId,
+        orderId: call.orderId,
+        aiAgentId: queueItem.aiAgentId ?? undefined,
+        callId: call.id,
+        message: CALL_CONNECTED_TRIGGER_MESSAGE,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Conversation engine failed to process call-answer for call ${call.id}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 }
