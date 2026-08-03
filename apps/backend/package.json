@@ -29,6 +29,7 @@
     "class-validator": "latest",
     "csv-parse": "^7.0.1",
     "dotenv": "latest",
+    "openai": "^7.3.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "read-excel-file": "^9.3.5",

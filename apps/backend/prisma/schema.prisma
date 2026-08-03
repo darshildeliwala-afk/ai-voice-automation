@@ -4,7 +4,7 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
 }
 
 enum Marketplace {
@@ -76,6 +76,18 @@ enum AiProvider {
   AZURE_OPENAI
 }
 
+enum ConversationStatus {
+  ACTIVE
+  COMPLETED
+  FAILED
+}
+
+enum ConversationRole {
+  SYSTEM
+  USER
+  ASSISTANT
+}
+
 enum ImportJobStatus {
   UPLOADED
   VALIDATED
@@ -112,6 +124,8 @@ model Workspace {
   telephonyConfigs       TelephonyConfig[]
   aiProviderConfigs      AiProviderConfig[]
   calls                  Call[]
+  conversations          Conversation[]
+  aiUsageRecords         AIUsage[]
 
   @@index([deletedAt])
 }
@@ -135,19 +149,20 @@ model User {
 }
 
 model Customer {
-  id          String    @id @default(uuid()) @db.Uuid
-  workspaceId String    @db.Uuid
-  name        String
-  phone       String
-  email       String?
-  language    String?
-  metadata    Json?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  deletedAt   DateTime?
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  orders      Order[]
-  calls       Call[]
+  id            String         @id @default(uuid()) @db.Uuid
+  workspaceId   String         @db.Uuid
+  name          String
+  phone         String
+  email         String?
+  language      String?
+  metadata      Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  deletedAt     DateTime?
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  orders        Order[]
+  calls         Call[]
+  conversations Conversation[]
 
   @@index([workspaceId])
   @@index([phone])
@@ -155,26 +170,27 @@ model Customer {
 }
 
 model Order {
-  id                 String      @id @default(uuid()) @db.Uuid
-  workspaceId        String      @db.Uuid
-  customerId         String      @db.Uuid
+  id                 String         @id @default(uuid()) @db.Uuid
+  workspaceId        String         @db.Uuid
+  customerId         String         @db.Uuid
   marketplace        Marketplace
   marketplaceOrderId String?
   paymentType        PaymentType
-  status             OrderStatus @default(PENDING)
-  totalAmount        Decimal     @db.Decimal(12, 2)
-  currency           String      @default("INR") @db.VarChar(3)
+  status             OrderStatus    @default(PENDING)
+  totalAmount        Decimal        @db.Decimal(12, 2)
+  currency           String         @default("INR") @db.VarChar(3)
   shippingAddress    Json?
   notes              String?
   metadata           Json?
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
   deletedAt          DateTime?
-  workspace          Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  customer           Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  workspace          Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer           Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   items              OrderItem[]
   callQueue          CallQueue[]
   calls              Call[]
+  conversations      Conversation[]
 
   @@unique([workspaceId, marketplace, marketplaceOrderId])
   @@index([customerId])
@@ -218,6 +234,7 @@ model AiAgent {
   workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   knowledgeBase   KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
   callQueue       CallQueue[]
+  conversations   Conversation[]
 
   @@index([workspaceId])
   @@index([knowledgeBaseId])
@@ -275,6 +292,7 @@ model Call {
   customer        Customer          @relation(fields: [customerId], references: [id], onDelete: Restrict)
   callQueue       CallQueue         @relation(fields: [callQueueId], references: [id], onDelete: Cascade)
   transcript      Transcript?
+  conversation    Conversation?
 
   @@index([workspaceId])
   @@index([orderId])
@@ -309,6 +327,70 @@ model Transcript {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   call      Call     @relation(fields: [callId], references: [id], onDelete: Cascade)
+}
+
+/// A single AI conversation thread, scoped to a workspace and customer.
+/// Optionally tied to an order (what the conversation is about), an
+/// AiAgent (which persona/config drove it), and a Call (if it happened
+/// over the phone -- not required, since the AI provider layer is
+/// usable independent of an active voice call).
+model Conversation {
+  id           String                @id @default(uuid()) @db.Uuid
+  workspaceId  String                @db.Uuid
+  customerId   String                @db.Uuid
+  orderId      String?               @db.Uuid
+  aiAgentId    String?               @db.Uuid
+  callId       String?               @unique @db.Uuid
+  status       ConversationStatus    @default(ACTIVE)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer     Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  order        Order?                @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  aiAgent      AiAgent?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  call         Call?                 @relation(fields: [callId], references: [id], onDelete: SetNull)
+  messages     ConversationMessage[]
+  usageRecords AIUsage[]
+
+  @@index([workspaceId])
+  @@index([customerId])
+  @@index([orderId])
+  @@index([aiAgentId])
+}
+
+model ConversationMessage {
+  id             String           @id @default(uuid()) @db.Uuid
+  conversationId String           @db.Uuid
+  role           ConversationRole
+  content        String
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([conversationId, createdAt])
+}
+
+/// Per-request AI usage/cost record, primarily for billing and
+/// observability. `estimatedCost` is computed from a static per-model
+/// pricing table at write time (see ai/pricing) -- not a live lookup.
+model AIUsage {
+  id               String        @id @default(uuid()) @db.Uuid
+  workspaceId      String        @db.Uuid
+  conversationId   String?       @db.Uuid
+  provider         AiProvider
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  totalTokens      Int
+  estimatedCost    Decimal       @db.Decimal(10, 6)
+  createdAt        DateTime      @default(now())
+  workspace        Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation     Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([conversationId])
+  @@index([workspaceId, createdAt])
 }
 
 model KnowledgeBase {
@@ -457,16 +539,16 @@ model TelephonyConfig {
 /// (see EncryptionService) and must never be returned by any API. Multiple
 /// rows may exist per workspace; at most one is `isActive` at a time.
 model AiProviderConfig {
-  id            String     @id @default(uuid()) @db.Uuid
-  workspaceId   String     @db.Uuid
-  provider      AiProvider
-  apiKey        String
-  defaultModel  String?
-  temperature   Float      @default(0.7)
-  isActive      Boolean    @default(true)
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
-  workspace     Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid()) @db.Uuid
+  workspaceId  String     @db.Uuid
+  provider     AiProvider
+  apiKey       String
+  defaultModel String?
+  temperature  Float      @default(0.7)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
   @@index([workspaceId, isActive])

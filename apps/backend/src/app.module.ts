@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
 
 import { AgentsModule } from "./agents/agents.module";
+import { AiModule } from "./ai/ai.module";
 import { AiAgentModule } from "./ai-agent/ai-agent.module";
 import { AuthModule } from "./auth/auth.module";
 import { EncryptionModule } from "./common/encryption/encryption.module";
@@ -34,6 +35,7 @@ import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings
     QueueModule,
     WorkspaceSettingsModule,
     TelephonyModule,
+    AiModule,
   ],
 })
 export class AppModule {}
