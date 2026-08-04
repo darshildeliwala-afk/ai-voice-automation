@@ -70,6 +70,7 @@ export class PromptNodeHandler implements IWorkflowNodeHandler {
       const completion = await context.provider.chat({
         messages: context.messages,
         tools,
+        signal: context.abortSignal,
       });
       const callLatencyMs = Date.now() - callStartedAt;
 

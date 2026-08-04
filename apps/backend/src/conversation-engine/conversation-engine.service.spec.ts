@@ -6,7 +6,11 @@ const WORKSPACE_ID = "workspace-1";
 const CUSTOMER_ID = "customer-1";
 
 function setup() {
-  const conversation = { create: jest.fn(), findFirst: jest.fn() };
+  const conversation = {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+    update: jest.fn().mockResolvedValue({}),
+  };
   const conversationMessage = { create: jest.fn().mockResolvedValue({}) };
   const prisma = { conversation, conversationMessage };
 
@@ -38,7 +42,13 @@ function setup() {
     build: jest.fn().mockResolvedValue({
       systemPrompt: "system context",
       history: [],
+      resolvedLanguage: "hi-en",
+      pauseDurationsMs: { short: 300, medium: 500, long: 700 },
     }),
+  };
+
+  const languageDetectionService = {
+    detectLanguagePreference: jest.fn().mockReturnValue(null),
   };
 
   const aiProviderConfigService = {
@@ -77,6 +87,7 @@ function setup() {
     aiProviderConfigService as never,
     workflowService as never,
     workflowExecutionEngine as never,
+    languageDetectionService as never,
   );
 
   return {
@@ -94,6 +105,7 @@ function setup() {
     aiProviderConfigService,
     workflowService,
     workflowExecutionEngine,
+    languageDetectionService,
     graph,
   };
 }
@@ -318,6 +330,93 @@ describe("ConversationEngineService", () => {
 
       expect(result.toolCallsExecuted).toEqual(["lookup_order"]);
       expect(result.totalTokens).toBe(55);
+    });
+  });
+
+  describe("language detection (Sprint 18)", () => {
+    it("persists a detected language onto the Conversation and threads it into the prompt builder", async () => {
+      const { service, conversation, languageDetectionService, promptBuilder } =
+        setup();
+      conversation.create.mockResolvedValue({ id: "conv-new", language: null });
+      languageDetectionService.detectLanguagePreference.mockReturnValue({
+        code: "hi",
+        label: "Hindi",
+        supported: true,
+      });
+      promptBuilder.build.mockResolvedValue({
+        systemPrompt: "sys",
+        history: [],
+        resolvedLanguage: "hi",
+        pauseDurationsMs: { short: 300, medium: 500, long: 700 },
+      });
+
+      const result = await service.processMessage({
+        workspaceId: WORKSPACE_ID,
+        customerId: CUSTOMER_ID,
+        message: "Hindi mein boliye",
+      });
+
+      expect(conversation.update).toHaveBeenCalledWith({
+        where: { id: "conv-new" },
+        data: { language: "hi" },
+      });
+      expect(promptBuilder.build).toHaveBeenCalledWith(
+        expect.objectContaining({ resolvedLanguage: "hi" }),
+      );
+      expect(result.resolvedLanguage).toBe("hi");
+    });
+
+    it("does not touch the Conversation when no explicit language preference is detected", async () => {
+      const { service, conversation, languageDetectionService } = setup();
+      conversation.create.mockResolvedValue({ id: "conv-new", language: null });
+      languageDetectionService.detectLanguagePreference.mockReturnValue(null);
+
+      const result = await service.processMessage({
+        workspaceId: WORKSPACE_ID,
+        customerId: CUSTOMER_ID,
+        message: "What's the status of my order?",
+      });
+
+      expect(conversation.update).not.toHaveBeenCalled();
+      expect(result.resolvedLanguage).toBe("hi-en");
+    });
+
+    it("does not re-persist when the detected language matches what's already stored", async () => {
+      const { service, conversation, languageDetectionService } = setup();
+      conversation.create.mockResolvedValue({ id: "conv-new", language: "hi" });
+      languageDetectionService.detectLanguagePreference.mockReturnValue({
+        code: "hi",
+        label: "Hindi",
+        supported: true,
+      });
+
+      await service.processMessage({
+        workspaceId: WORKSPACE_ID,
+        customerId: CUSTOMER_ID,
+        message: "Hindi mein hi boliye",
+      });
+
+      expect(conversation.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("abort signal (barge-in cancellation, Sprint 18)", () => {
+    it("forwards ProcessMessageInput.abortSignal into the workflow execution context", async () => {
+      const { service, conversation, workflowExecutionEngine } = setup();
+      conversation.create.mockResolvedValue({ id: "conv-new" });
+      const controller = new AbortController();
+
+      await service.processMessage({
+        workspaceId: WORKSPACE_ID,
+        customerId: CUSTOMER_ID,
+        message: "Hi",
+        abortSignal: controller.signal,
+      });
+
+      expect(workflowExecutionEngine.execute).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ abortSignal: controller.signal }),
+      );
     });
   });
 });

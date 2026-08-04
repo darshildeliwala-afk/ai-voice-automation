@@ -8,10 +8,12 @@ import { UpdateAiProviderConfigDto } from "./dto/update-ai-provider-config.dto";
 import { UpdateSttProviderConfigDto } from "./dto/update-stt-provider-config.dto";
 import { UpdateTelephonyConfigDto } from "./dto/update-telephony-config.dto";
 import { UpdateTtsProviderConfigDto } from "./dto/update-tts-provider-config.dto";
+import { UpdateVoicePersonaConfigDto } from "./dto/update-voice-persona-config.dto";
 import { UpdateWorkspaceSettingsDto } from "./dto/update-workspace-settings.dto";
 import { SttProviderConfigService } from "./stt-provider-config.service";
 import { TelephonyConfigService } from "./telephony-config.service";
 import { TtsProviderConfigService } from "./tts-provider-config.service";
+import { VoicePersonaConfigService } from "./voice-persona-config.service";
 import { WorkspaceSettingsService } from "./workspace-settings.service";
 
 @Controller("workspace-settings")
@@ -23,6 +25,7 @@ export class WorkspaceSettingsController {
     private readonly aiProviderConfigService: AiProviderConfigService,
     private readonly sttProviderConfigService: SttProviderConfigService,
     private readonly ttsProviderConfigService: TtsProviderConfigService,
+    private readonly voicePersonaConfigService: VoicePersonaConfigService,
   ) {}
 
   @Get()
@@ -91,5 +94,21 @@ export class WorkspaceSettingsController {
     @Body() dto: UpdateTtsProviderConfigDto,
   ) {
     return this.ttsProviderConfigService.upsertConfig(user.workspaceId, dto);
+  }
+
+  @Get("voice-persona")
+  getVoicePersonaConfig(@CurrentUser() user: AuthenticatedUser) {
+    return this.voicePersonaConfigService.getWorkspaceConfig(user.workspaceId);
+  }
+
+  @Put("voice-persona")
+  updateVoicePersonaConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateVoicePersonaConfigDto,
+  ) {
+    return this.voicePersonaConfigService.updateWorkspaceConfig(
+      user.workspaceId,
+      dto,
+    );
   }
 }

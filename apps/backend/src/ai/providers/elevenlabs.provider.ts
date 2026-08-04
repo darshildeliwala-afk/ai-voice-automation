@@ -35,6 +35,16 @@ class ElevenLabsStream implements ITTSStream {
     try {
       const voiceId = options?.voice ?? credentials.voice ?? DEFAULT_VOICE_ID;
 
+      // Generic persona knobs (Sprint 18) mapped into ElevenLabs' own
+      // voice_settings shape -- only included when at least one is
+      // present, so a plain synthesizeStream(text) call keeps sending
+      // exactly the same body it always has. `pitch` has no ElevenLabs
+      // voice_settings equivalent today (see TTSStreamOptions) and is
+      // intentionally not mapped.
+      const voiceSettings: Record<string, number> = {};
+      if (options?.speakingRate !== undefined) voiceSettings.speed = options.speakingRate;
+      if (options?.warmth !== undefined) voiceSettings.style = options.warmth;
+
       const response = await fetch(ELEVENLABS_STREAM_URL(voiceId), {
         method: "POST",
         headers: {
@@ -45,6 +55,7 @@ class ElevenLabsStream implements ITTSStream {
         body: JSON.stringify({
           text,
           model_id: DEFAULT_MODEL_ID,
+          ...(Object.keys(voiceSettings).length > 0 ? { voice_settings: voiceSettings } : {}),
         }),
         signal: this.abortController.signal,
       });

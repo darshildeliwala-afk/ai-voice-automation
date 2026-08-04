@@ -30,6 +30,8 @@ export interface ChatCompletionInput {
   temperature?: number;
   /** Tools the model may call. Omit for a plain, tool-less completion (Sprint 14 behavior). */
   tools?: AIToolDefinition[];
+  /** Barge-in hook (Sprint 18): aborts the in-flight call when the customer starts speaking mid-turn. */
+  signal?: AbortSignal;
 }
 
 export interface ChatCompletionResult {

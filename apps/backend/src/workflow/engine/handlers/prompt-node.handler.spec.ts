@@ -212,4 +212,25 @@ describe("PromptNodeHandler", () => {
 
     expect(chat).toHaveBeenCalledTimes(5);
   });
+
+  it("forwards context.abortSignal into provider.chat() as signal (barge-in cancellation)", async () => {
+    const { handler, chat, context } = setup();
+    const controller = new AbortController();
+    context.abortSignal = controller.signal;
+    chat.mockResolvedValue({
+      content: "Hello!",
+      model: "gpt-4o-mini",
+      promptTokens: 1,
+      completionTokens: 1,
+      totalTokens: 2,
+      rawResponse: {},
+    });
+
+    const node = { key: "start", type: WorkflowNodeType.PROMPT, config: { next: "end" } };
+    await handler.execute(node, context);
+
+    expect(chat).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });

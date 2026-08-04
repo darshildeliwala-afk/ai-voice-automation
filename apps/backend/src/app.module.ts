@@ -12,6 +12,7 @@ import { CustomerModule } from "./customer/customer.module";
 import { HealthModule } from "./health/health.module";
 import { ImportsModule } from "./imports/imports.module";
 import { KnowledgeBaseModule } from "./knowledge-base/knowledge-base.module";
+import { MediaStreamModule } from "./media-stream/media-stream.module";
 import { OrdersModule } from "./orders/orders.module";
 import { QueueModule } from "./queue/queue.module";
 import { TelephonyModule } from "./telephony/telephony.module";
@@ -40,6 +41,7 @@ import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings
     AiModule,
     WorkflowModule,
     ConversationEngineModule,
+    MediaStreamModule,
   ],
 })
 export class AppModule {}

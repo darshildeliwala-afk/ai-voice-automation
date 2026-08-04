@@ -79,6 +79,45 @@ describe("ElevenLabsProvider", () => {
     );
   });
 
+  describe("persona knobs (Sprint 18)", () => {
+    it("sends no voice_settings block when no persona knobs are given -- body stays byte-identical to before", async () => {
+      fetchMock.mockResolvedValue(fakeResponse());
+      const provider = new ElevenLabsProvider(credentials());
+      const stream = provider.synthesizeStream("hello", { voice: "voice-a" });
+
+      await waitForEnd(stream);
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body).toEqual({ text: "hello", model_id: "eleven_turbo_v2" });
+    });
+
+    it("maps speakingRate and warmth into ElevenLabs' voice_settings.speed/style", async () => {
+      fetchMock.mockResolvedValue(fakeResponse());
+      const provider = new ElevenLabsProvider(credentials());
+      const stream = provider.synthesizeStream("hello", {
+        voice: "voice-a",
+        speakingRate: 1.2,
+        warmth: 0.8,
+      });
+
+      await waitForEnd(stream);
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.voice_settings).toEqual({ speed: 1.2, style: 0.8 });
+    });
+
+    it("does not map pitch -- accepted but no ElevenLabs equivalent today", async () => {
+      fetchMock.mockResolvedValue(fakeResponse());
+      const provider = new ElevenLabsProvider(credentials());
+      const stream = provider.synthesizeStream("hello", { voice: "voice-a", pitch: 0.5 });
+
+      await waitForEnd(stream);
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.voice_settings).toBeUndefined();
+    });
+  });
+
   it("emits each audio chunk in order, then onEnd", async () => {
     const chunkA = new Uint8Array([1, 2, 3]);
     const chunkB = new Uint8Array([4, 5]);

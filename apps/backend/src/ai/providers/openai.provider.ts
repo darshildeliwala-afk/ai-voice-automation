@@ -121,14 +121,23 @@ export class OpenAIProvider implements IAIProvider {
 
   async chat(input: ChatCompletionInput): Promise<ChatCompletionResult> {
     try {
-      const response = await this.client.chat.completions.create({
+      const body = {
         model: input.model || this.credentials.defaultModel || DEFAULT_MODEL,
         messages: input.messages.map(toOpenAIMessage),
         temperature: input.temperature ?? this.credentials.temperature,
         tools: input.tools?.map((tool) =>
           toOpenAITool(tool.name, tool.description, tool.parameters),
         ),
-      });
+      };
+
+      // Only pass a second request-options argument when a signal is
+      // actually present, so a call with no signal keeps today's exact
+      // one-argument call shape (barge-in cancellation, Sprint 18).
+      const response = input.signal
+        ? await this.client.chat.completions.create(body, {
+            signal: input.signal,
+          })
+        : await this.client.chat.completions.create(body);
 
       const choice = response.choices[0];
       const usage = response.usage;

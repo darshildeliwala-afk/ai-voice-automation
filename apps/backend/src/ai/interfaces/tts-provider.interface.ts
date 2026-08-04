@@ -5,6 +5,12 @@ export interface TTSStreamOptions {
   sampleRate?: number;
   /** e.g. "mulaw" | "linear16". */
   encoding?: string;
+  /** Generic persona knob (Sprint 18), 0.5-2.0, 1.0 = provider-normal rate. Each provider maps it to its own param -- callers never send provider-specific fields. */
+  speakingRate?: number;
+  /** Generic persona knob (Sprint 18), -1.0..1.0, 0 = neutral. Accepted even when a given provider has no equivalent to map it to yet. */
+  pitch?: number;
+  /** Generic persona knob (Sprint 18), 0-1, higher = warmer/more expressive delivery. */
+  warmth?: number;
 }
 
 /**

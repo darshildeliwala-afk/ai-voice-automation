@@ -23,6 +23,8 @@ export interface WorkflowExecutionContext {
   providerName: AiProvider;
   messages: ChatMessage[];
   state: Record<string, unknown>;
+  /** Barge-in hook (Sprint 18): cancels any in-flight provider.chat() call when the customer starts speaking mid-turn. */
+  abortSignal?: AbortSignal;
 }
 
 export interface WorkflowNodeUsage {

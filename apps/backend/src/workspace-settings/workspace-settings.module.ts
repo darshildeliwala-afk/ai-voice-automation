@@ -6,6 +6,7 @@ import { AiProviderConfigService } from "./ai-provider-config.service";
 import { SttProviderConfigService } from "./stt-provider-config.service";
 import { TelephonyConfigService } from "./telephony-config.service";
 import { TtsProviderConfigService } from "./tts-provider-config.service";
+import { VoicePersonaConfigService } from "./voice-persona-config.service";
 import { WorkspaceSettingsController } from "./workspace-settings.controller";
 import { WorkspaceSettingsService } from "./workspace-settings.service";
 
@@ -18,6 +19,7 @@ import { WorkspaceSettingsService } from "./workspace-settings.service";
     AiProviderConfigService,
     SttProviderConfigService,
     TtsProviderConfigService,
+    VoicePersonaConfigService,
   ],
   exports: [
     WorkspaceSettingsService,
@@ -25,6 +27,7 @@ import { WorkspaceSettingsService } from "./workspace-settings.service";
     AiProviderConfigService,
     SttProviderConfigService,
     TtsProviderConfigService,
+    VoicePersonaConfigService,
   ],
 })
 export class WorkspaceSettingsModule {}

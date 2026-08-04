@@ -132,6 +132,23 @@ enum TtsProvider {
   CARTESIA
 }
 
+enum VoicePersonaTone {
+  FRIENDLY
+  PROFESSIONAL
+  SUPPORT
+  SALES
+  EMPATHETIC
+  HEALTHCARE
+  BANKING
+  COLLECTIONS
+}
+
+enum VoiceGender {
+  MALE
+  FEMALE
+  NEUTRAL
+}
+
 model Workspace {
   id                     String                  @id @default(uuid()) @db.Uuid
   name                   String
@@ -157,6 +174,7 @@ model Workspace {
   workflows              Workflow[]
   sttProviderConfigs     SttProviderConfig[]
   ttsProviderConfigs     TtsProviderConfig[]
+  voicePersonaConfig     VoicePersonaConfig?
 
   @@index([deletedAt])
 }
@@ -245,28 +263,29 @@ model OrderItem {
 }
 
 model AiAgent {
-  id              String         @id @default(uuid()) @db.Uuid
-  workspaceId     String         @db.Uuid
-  knowledgeBaseId String?        @db.Uuid
-  name            String
-  description     String?
-  provider        String
-  model           String
-  voice           String
-  language        String
-  systemPrompt    String?
-  greeting        String?
-  temperature     Float          @default(0.7)
-  isActive        Boolean        @default(true)
-  configuration   Json?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  deletedAt       DateTime?
-  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  knowledgeBase   KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
-  callQueue       CallQueue[]
-  conversations   Conversation[]
-  workflows       Workflow[]
+  id                   String                       @id @default(uuid()) @db.Uuid
+  workspaceId          String                       @db.Uuid
+  knowledgeBaseId      String?                      @db.Uuid
+  name                 String
+  description          String?
+  provider             String
+  model                String
+  voice                String
+  language             String
+  systemPrompt         String?
+  greeting             String?
+  temperature          Float                        @default(0.7)
+  isActive             Boolean                      @default(true)
+  configuration        Json?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  deletedAt            DateTime?
+  workspace            Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  knowledgeBase        KnowledgeBase?               @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  callQueue            CallQueue[]
+  conversations        Conversation[]
+  workflows            Workflow[]
+  voicePersonaOverride AiAgentVoicePersonaOverride?
 
   @@index([workspaceId])
   @@index([knowledgeBaseId])
@@ -374,6 +393,8 @@ model Conversation {
   aiAgentId    String?               @db.Uuid
   callId       String?               @unique @db.Uuid
   status       ConversationStatus    @default(ACTIVE)
+  /// Resolved language code once detected/confirmed this call (e.g. "hi", "en", "gu"); null until a customer states an explicit preference (Sprint 18 LanguageDetectionService).
+  language     String?
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
   workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -625,6 +646,83 @@ model TtsProviderConfig {
   @@index([workspaceId, isActive])
 }
 
+/// Workspace-level default voice/conversation persona (Sprint 18 human-
+/// sounding voice engine). One row per workspace, auto-provisioned with
+/// defaults on first access -- same findUnique-then-create/upsert pattern
+/// as WorkspaceSettings (not the credential isActive-history pattern used
+/// by AiProviderConfig/SttProviderConfig/TtsProviderConfig -- this table
+/// holds no secrets). Every behavior-driving field carries a concrete
+/// default, so this row *is* the materialized "system default" tier that
+/// AiAgentVoicePersonaOverride falls back to when unset.
+model VoicePersonaConfig {
+  id                 String           @id @default(uuid()) @db.Uuid
+  workspaceId        String           @unique @db.Uuid
+  tone               VoicePersonaTone @default(FRIENDLY)
+  /// Free-form language code (e.g. "hi-en" Hinglish, "hi", "en", "gu") --
+  /// not an enum; new languages are added via LanguageDetectionService's
+  /// registry, never by touching this schema.
+  language           String           @default("hi-en")
+  voiceGender        VoiceGender?
+  /// Provider-specific voice identifier/name; TTS provider adapters
+  /// resolve it to their own voice catalog -- schema stays provider-agnostic.
+  voiceName          String?
+  indianAccent       Boolean          @default(true)
+  /// 0.5-2.0, 1.0 = provider-normal speaking rate.
+  speakingRate       Float            @default(1.0)
+  /// -1.0..1.0, 0 = neutral pitch.
+  pitch              Float            @default(0.0)
+  /// 0-1, higher = warmer/more expressive delivery.
+  warmth             Float            @default(0.5)
+  /// 0-1, 0 = fully casual/friendly, 1 = fully formal/professional.
+  professionalism    Float            @default(0.5)
+  pauseShortMs       Int              @default(300)
+  pauseMediumMs      Int              @default(500)
+  pauseLongMs        Int              @default(700)
+  fillerWordsEnabled Boolean          @default(true)
+  bargeInEnabled     Boolean          @default(true)
+  /// Soft guidance -- target words per turn, keeps responses conversational.
+  maxResponseLength  Int              @default(60)
+  /// Overrides MediaSessionConfig's global silence-timeout default per workspace.
+  silenceThresholdMs Int              @default(2000)
+  greetingStyle      String?
+  closingStyle       String?
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  workspace          Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+/// Sparse per-AI-Agent override of the workspace's VoicePersonaConfig
+/// (Sprint 18). Every field is nullable with no default -- an agent that
+/// only wants a different tone sets `tone` and leaves the rest null;
+/// VoicePersonaConfigService.resolveEffectiveConfig() reads through to
+/// the workspace row for anything unset. This is the literal mechanism
+/// for field-level inheritance instead of copying the whole record.
+model AiAgentVoicePersonaOverride {
+  id                 String            @id @default(uuid()) @db.Uuid
+  aiAgentId          String            @unique @db.Uuid
+  tone               VoicePersonaTone?
+  language           String?
+  voiceGender        VoiceGender?
+  voiceName          String?
+  indianAccent       Boolean?
+  speakingRate       Float?
+  pitch              Float?
+  warmth             Float?
+  professionalism    Float?
+  pauseShortMs       Int?
+  pauseMediumMs      Int?
+  pauseLongMs        Int?
+  fillerWordsEnabled Boolean?
+  bargeInEnabled     Boolean?
+  maxResponseLength  Int?
+  silenceThresholdMs Int?
+  greetingStyle      String?
+  closingStyle       String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  aiAgent            AiAgent           @relation(fields: [aiAgentId], references: [id], onDelete: Cascade)
+}
+
 /// A versioned AI Agent conversation workflow: a graph of WorkflowNodes the
 /// ConversationEngine executes instead of the fixed single-prompt loop.
 /// Rows are insert-only per version (never mutated once PUBLISHED), the
@@ -634,21 +732,21 @@ model TtsProviderConfig {
 /// `aiAgentId` null means "workspace-wide default workflow" (used when an
 /// agent has no workflow of its own).
 model Workflow {
-  id           String           @id @default(uuid()) @db.Uuid
-  workspaceId  String           @db.Uuid
-  aiAgentId    String?          @db.Uuid
+  id           String         @id @default(uuid()) @db.Uuid
+  workspaceId  String         @db.Uuid
+  aiAgentId    String?        @db.Uuid
   slug         String
   name         String
   description  String?
-  version      Int              @default(1)
-  status       WorkflowStatus   @default(DRAFT)
-  isActive     Boolean          @default(false)
+  version      Int            @default(1)
+  status       WorkflowStatus @default(DRAFT)
+  isActive     Boolean        @default(false)
   entryNodeKey String?
-  createdAt    DateTime         @default(now())
-  updatedAt    DateTime         @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
   deletedAt    DateTime?
-  workspace    Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  aiAgent      AiAgent?         @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  workspace    Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  aiAgent      AiAgent?       @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
   nodes        WorkflowNode[]
 
   @@unique([workspaceId, slug, version])

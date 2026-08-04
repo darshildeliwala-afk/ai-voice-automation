@@ -17,6 +17,7 @@ import { WorkflowExecutionEngine } from "../workflow/engine/workflow-execution.e
 import { WorkflowService } from "../workflow/workflow.service";
 import { AiProviderConfigService } from "../workspace-settings/ai-provider-config.service";
 import { WorkspaceService } from "../workspace/workspace.service";
+import { LanguageDetectionService } from "./language-detection.service";
 
 export interface ProcessMessageInput {
   workspaceId: string;
@@ -28,6 +29,8 @@ export interface ProcessMessageInput {
   conversationId?: string;
   /** Links a newly-created conversation to the Call it happened over (ignored when continuing an existing conversation). */
   callId?: string;
+  /** Barge-in hook (Sprint 18): aborts the in-flight LLM call if the customer starts speaking mid-turn. */
+  abortSignal?: AbortSignal;
 }
 
 export interface ProcessMessageResult {
@@ -42,6 +45,8 @@ export interface ProcessMessageResult {
   estimatedCost: number;
   latencyMs: number;
   toolCallsExecuted: string[];
+  /** Language this turn was framed in -- LanguageDetectionService's match on input.message, or the Conversation's previously-detected language, or the workspace/agent persona's default (Sprint 18). */
+  resolvedLanguage: string;
 }
 
 /**
@@ -70,6 +75,7 @@ export class ConversationEngineService extends BaseService {
     private readonly aiProviderConfigService: AiProviderConfigService,
     private readonly workflowService: WorkflowService,
     private readonly workflowExecutionEngine: WorkflowExecutionEngine,
+    private readonly languageDetectionService: LanguageDetectionService,
   ) {
     super();
   }
@@ -127,15 +133,33 @@ export class ConversationEngineService extends BaseService {
     // Load (or create) the Conversation.
     const conversation = await this.resolveConversation(input);
 
+    // Detect an explicit language-preference request in this turn's
+    // message ("Hindi mein boliye", "Can we speak in English?") and
+    // persist it onto the Conversation the moment it changes, so it's
+    // exposed (not buried) for the rest of the call and any future
+    // STT/TTS provider to consume (Sprint 18).
+    const detection = this.languageDetectionService.detectLanguagePreference(
+      input.message,
+    );
+    if (detection && detection.code !== conversation.language) {
+      await this.prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { language: detection.code },
+      });
+    }
+    const resolvedLanguageInput =
+      detection?.code ?? conversation.language ?? undefined;
+
     // Build the base prompt (this internally loads AI Agent, Knowledge
     // Base, Customer, Order, and previous conversation history and
     // formats them into a single system prompt + prior-turn messages).
-    const { systemPrompt, history } = await this.promptBuilder.build({
+    const { systemPrompt, history, resolvedLanguage } = await this.promptBuilder.build({
       workspaceId: input.workspaceId,
       customerId: input.customerId,
       orderId: input.orderId,
       aiAgentId: input.aiAgentId,
       conversationId: conversation.id,
+      resolvedLanguage: resolvedLanguageInput,
     });
 
     await this.persistMessage(
@@ -169,6 +193,7 @@ export class ConversationEngineService extends BaseService {
       providerName,
       messages,
       state: {},
+      abortSignal: input.abortSignal,
     });
 
     return {
@@ -182,6 +207,7 @@ export class ConversationEngineService extends BaseService {
       estimatedCost: result.estimatedCost,
       latencyMs: Date.now() - startedAt,
       toolCallsExecuted: result.toolCallsExecuted,
+      resolvedLanguage,
     };
   }
 

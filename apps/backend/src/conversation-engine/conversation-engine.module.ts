@@ -8,6 +8,7 @@ import { WorkflowModule } from "../workflow/workflow.module";
 import { WorkspaceSettingsModule } from "../workspace-settings/workspace-settings.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
 import { ConversationEngineService } from "./conversation-engine.service";
+import { LanguageDetectionService } from "./language-detection.service";
 
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { ConversationEngineService } from "./conversation-engine.service";
     AiAgentModule,
     WorkflowModule,
   ],
-  providers: [ConversationEngineService],
+  providers: [ConversationEngineService, LanguageDetectionService],
   exports: [ConversationEngineService],
 })
 export class ConversationEngineModule {}

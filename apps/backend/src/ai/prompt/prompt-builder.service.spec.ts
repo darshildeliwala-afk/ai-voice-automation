@@ -60,6 +60,28 @@ function setup() {
       items: [{ name: "Widget", quantity: 2, unitPrice: 50 }],
     }),
   };
+  const voicePersonaConfigService = {
+    resolveEffectiveConfig: jest.fn().mockResolvedValue({
+      tone: "FRIENDLY",
+      language: "hi-en",
+      voiceGender: null,
+      voiceName: null,
+      indianAccent: true,
+      speakingRate: 1.0,
+      pitch: 0.0,
+      warmth: 0.5,
+      professionalism: 0.5,
+      pauseShortMs: 300,
+      pauseMediumMs: 500,
+      pauseLongMs: 700,
+      fillerWordsEnabled: true,
+      bargeInEnabled: true,
+      maxResponseLength: 60,
+      silenceThresholdMs: 2000,
+      greetingStyle: null,
+      closingStyle: null,
+    }),
+  };
 
   const service = new PromptBuilderService(
     prisma as never,
@@ -68,6 +90,7 @@ function setup() {
     knowledgeBaseService as never,
     customerService as never,
     orderService as never,
+    voicePersonaConfigService as never,
   );
 
   return {
@@ -78,11 +101,12 @@ function setup() {
     knowledgeBaseService,
     customerService,
     orderService,
+    voicePersonaConfigService,
   };
 }
 
 describe("PromptBuilderService", () => {
-  it("always includes the base system instructions, workspace, and customer sections", async () => {
+  it("always includes the persona, workspace, and customer sections", async () => {
     const { service } = setup();
 
     const result = await service.build({
@@ -90,12 +114,62 @@ describe("PromptBuilderService", () => {
       customerId: "customer-1",
     });
 
-    expect(result.systemPrompt).toContain("AI voice assistant");
+    expect(result.systemPrompt).toContain("customer support executive");
     expect(result.systemPrompt).toContain("# Workspace");
     expect(result.systemPrompt).toContain("Acme Voice");
     expect(result.systemPrompt).toContain("# Customer");
     expect(result.systemPrompt).toContain("Jane Doe");
     expect(result.history).toEqual([]);
+  });
+
+  it("resolves the persona section from VoicePersonaConfigService, scoped to workspace and agent", async () => {
+    const { service, voicePersonaConfigService } = setup();
+
+    await service.build({
+      workspaceId: WORKSPACE_ID,
+      customerId: "customer-1",
+      aiAgentId: "agent-1",
+    });
+
+    expect(voicePersonaConfigService.resolveEffectiveConfig).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      "agent-1",
+    );
+  });
+
+  it("exposes resolvedLanguage, falling back to the persona default when no override is given", async () => {
+    const { service } = setup();
+
+    const result = await service.build({
+      workspaceId: WORKSPACE_ID,
+      customerId: "customer-1",
+    });
+
+    expect(result.resolvedLanguage).toBe("hi-en");
+  });
+
+  it("prefers an explicitly resolved language over the persona default", async () => {
+    const { service } = setup();
+
+    const result = await service.build({
+      workspaceId: WORKSPACE_ID,
+      customerId: "customer-1",
+      resolvedLanguage: "en",
+    });
+
+    expect(result.resolvedLanguage).toBe("en");
+    expect(result.systemPrompt).toContain("English");
+  });
+
+  it("exposes the persona's pause durations as structured data", async () => {
+    const { service } = setup();
+
+    const result = await service.build({
+      workspaceId: WORKSPACE_ID,
+      customerId: "customer-1",
+    });
+
+    expect(result.pauseDurationsMs).toEqual({ short: 300, medium: 500, long: 700 });
   });
 
   it("includes the AI Agent section and its Knowledge Base when aiAgentId is given", async () => {

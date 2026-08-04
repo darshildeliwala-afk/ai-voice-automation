@@ -9,9 +9,12 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
 } from "@nestjs/common";
 
+import { UpdateVoicePersonaConfigDto } from "../workspace-settings/dto/update-voice-persona-config.dto";
+import { VoicePersonaConfigService } from "../workspace-settings/voice-persona-config.service";
 import { AiAgentService } from "./ai-agent.service";
 import { CreateAiAgentDto } from "./dto/create-ai-agent.dto";
 import { ListAiAgentsQueryDto } from "./dto/list-ai-agents-query.dto";
@@ -19,7 +22,10 @@ import { UpdateAiAgentDto } from "./dto/update-ai-agent.dto";
 
 @Controller("ai-agents")
 export class AiAgentController {
-  constructor(private readonly aiAgentService: AiAgentService) {}
+  constructor(
+    private readonly aiAgentService: AiAgentService,
+    private readonly voicePersonaConfigService: VoicePersonaConfigService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -51,5 +57,18 @@ export class AiAgentController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
     await this.aiAgentService.softDeleteAiAgent(id);
+  }
+
+  @Get(":id/voice-persona")
+  getVoicePersonaOverride(@Param("id", ParseUUIDPipe) id: string) {
+    return this.voicePersonaConfigService.getAgentOverride(id);
+  }
+
+  @Put(":id/voice-persona")
+  updateVoicePersonaOverride(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Body() dto: UpdateVoicePersonaConfigDto,
+  ) {
+    return this.voicePersonaConfigService.updateAgentOverride(id, dto);
   }
 }

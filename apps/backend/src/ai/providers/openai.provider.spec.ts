@@ -364,4 +364,40 @@ describe("OpenAIProvider", () => {
       );
     });
   });
+
+  describe("abort signal (barge-in cancellation)", () => {
+    it("calls create() with no second argument when no signal is given", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      await provider.chat({ messages: [{ role: "user", content: "Hi" }] });
+
+      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(mockCreate.mock.calls[0]).toHaveLength(1);
+    });
+
+    it("passes the signal as create()'s second request-options argument when given", async () => {
+      mockCreate.mockResolvedValue({
+        model: "gpt-4o-mini",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      });
+      const controller = new AbortController();
+
+      const provider = new OpenAIProvider(CREDENTIALS);
+      await provider.chat({
+        messages: [{ role: "user", content: "Hi" }],
+        signal: controller.signal,
+      });
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "gpt-4o-mini" }),
+        { signal: controller.signal },
+      );
+    });
+  });
 });
