@@ -7,6 +7,8 @@ import { OrderModule } from "../order/order.module";
 import { WorkspaceSettingsModule } from "../workspace-settings/workspace-settings.module";
 import { AIService } from "./ai.service";
 import { AIProviderFactory } from "./providers/ai-provider.factory";
+import { STTProviderFactory } from "./providers/stt-provider.factory";
+import { TTSProviderFactory } from "./providers/tts-provider.factory";
 import { PromptBuilderService } from "./prompt/prompt-builder.service";
 
 @Module({
@@ -17,7 +19,19 @@ import { PromptBuilderService } from "./prompt/prompt-builder.service";
     CustomerModule,
     OrderModule,
   ],
-  providers: [AIService, AIProviderFactory, PromptBuilderService],
-  exports: [AIService, AIProviderFactory, PromptBuilderService],
+  providers: [
+    AIService,
+    AIProviderFactory,
+    STTProviderFactory,
+    TTSProviderFactory,
+    PromptBuilderService,
+  ],
+  exports: [
+    AIService,
+    AIProviderFactory,
+    STTProviderFactory,
+    TTSProviderFactory,
+    PromptBuilderService,
+  ],
 })
 export class AiModule {}

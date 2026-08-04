@@ -1,22 +1,35 @@
 import { AIProviderNotImplementedError } from "../errors/ai.errors";
 import type { AIProviderCredentials } from "../interfaces/ai-credentials.interface";
+import type { STTProviderCredentials } from "../interfaces/stt-credentials.interface";
+import type { TTSProviderCredentials } from "../interfaces/tts-credentials.interface";
 import { CartesiaProvider } from "./cartesia.provider";
 import { ClaudeProvider } from "./claude.provider";
-import { DeepgramProvider } from "./deepgram.provider";
-import { ElevenLabsProvider } from "./elevenlabs.provider";
 import { GeminiProvider } from "./gemini.provider";
+import { OpenAiTtsProvider } from "./openai-tts.provider";
 import { WhisperProvider } from "./whisper.provider";
 
-const CREDENTIALS: AIProviderCredentials = {
+const CHAT_CREDENTIALS: AIProviderCredentials = {
   provider: "ANTHROPIC" as never,
   apiKey: "placeholder-key",
   defaultModel: null,
   temperature: 0.7,
 };
 
+const STT_CREDENTIALS: STTProviderCredentials = {
+  provider: "WHISPER" as never,
+  apiKey: "placeholder-key",
+  language: "en",
+};
+
+const TTS_CREDENTIALS: TTSProviderCredentials = {
+  provider: "OPENAI" as never,
+  apiKey: "placeholder-key",
+  voice: null,
+};
+
 describe("placeholder providers", () => {
   it("ClaudeProvider.chat() rejects with AIProviderNotImplementedError", async () => {
-    const provider = new ClaudeProvider(CREDENTIALS);
+    const provider = new ClaudeProvider(CHAT_CREDENTIALS);
 
     await expect(
       provider.chat({ messages: [{ role: "user", content: "hi" }] }),
@@ -24,41 +37,33 @@ describe("placeholder providers", () => {
   });
 
   it("GeminiProvider.chat() rejects with AIProviderNotImplementedError", async () => {
-    const provider = new GeminiProvider(CREDENTIALS);
+    const provider = new GeminiProvider(CHAT_CREDENTIALS);
 
     await expect(
       provider.chat({ messages: [{ role: "user", content: "hi" }] }),
     ).rejects.toThrow(AIProviderNotImplementedError);
   });
 
-  it("DeepgramProvider.transcribe() rejects with AIProviderNotImplementedError", async () => {
-    const provider = new DeepgramProvider();
+  it("WhisperProvider.startStream() throws AIProviderNotImplementedError", () => {
+    const provider = new WhisperProvider(STT_CREDENTIALS);
 
-    await expect(
-      provider.transcribe({ audio: Buffer.from(""), contentType: "audio/wav" }),
-    ).rejects.toThrow(AIProviderNotImplementedError);
-  });
-
-  it("WhisperProvider.transcribe() rejects with AIProviderNotImplementedError", async () => {
-    const provider = new WhisperProvider();
-
-    await expect(
-      provider.transcribe({ audio: Buffer.from(""), contentType: "audio/wav" }),
-    ).rejects.toThrow(AIProviderNotImplementedError);
-  });
-
-  it("ElevenLabsProvider.synthesize() rejects with AIProviderNotImplementedError", async () => {
-    const provider = new ElevenLabsProvider();
-
-    await expect(provider.synthesize({ text: "hello" })).rejects.toThrow(
+    expect(() => provider.startStream({ sampleRate: 8000, encoding: "mulaw" })).toThrow(
       AIProviderNotImplementedError,
     );
   });
 
-  it("CartesiaProvider.synthesize() rejects with AIProviderNotImplementedError", async () => {
-    const provider = new CartesiaProvider();
+  it("OpenAiTtsProvider.synthesizeStream() throws AIProviderNotImplementedError", () => {
+    const provider = new OpenAiTtsProvider(TTS_CREDENTIALS);
 
-    await expect(provider.synthesize({ text: "hello" })).rejects.toThrow(
+    expect(() => provider.synthesizeStream("hello")).toThrow(
+      AIProviderNotImplementedError,
+    );
+  });
+
+  it("CartesiaProvider.synthesizeStream() throws AIProviderNotImplementedError", () => {
+    const provider = new CartesiaProvider(TTS_CREDENTIALS);
+
+    expect(() => provider.synthesizeStream("hello")).toThrow(
       AIProviderNotImplementedError,
     );
   });

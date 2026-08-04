@@ -6,6 +6,7 @@ import * as plivo from "plivo";
 const PlivoXmlResponse = plivo.Response as unknown as new () => {
   addSpeak(body: string, attributes: Record<string, unknown>): unknown;
   addRecord(attributes: Record<string, unknown>): unknown;
+  addStream(body: string, attributes: Record<string, unknown>): unknown;
   toXML(): string;
 };
 
@@ -18,6 +19,7 @@ import {
 } from "../../errors/telephony.errors";
 import type {
   AnswerResponse,
+  BuildAnswerResponseInput,
   GetCallResult,
   HangupResult,
   ICallProvider,
@@ -183,8 +185,19 @@ export class PlivoProvider implements ICallProvider {
     };
   }
 
-  buildAnswerResponse(): AnswerResponse {
+  buildAnswerResponse(input: BuildAnswerResponseInput = {}): AnswerResponse {
     const response = new PlivoXmlResponse();
+
+    if (input.streamUrl) {
+      response.addStream(input.streamUrl, {
+        bidirectional: true,
+        keepCallAlive: true,
+        contentType: "audio/x-mulaw;rate=8000",
+      });
+
+      return { contentType: "text/xml", body: response.toXML() };
+    }
+
     response.addSpeak(
       "Thank you for confirming. This call is being recorded for quality purposes.",
       { voice: "WOMAN", language: "en-US" },

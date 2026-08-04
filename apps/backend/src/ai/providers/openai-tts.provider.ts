@@ -7,16 +7,16 @@ import type {
 } from "../interfaces/tts-provider.interface";
 
 /**
- * Placeholder for Cartesia streaming TTS (Sprint 17). Not implemented this
+ * Placeholder for OpenAI streaming TTS (Sprint 17). Not implemented this
  * sprint. Swap for a real implementation behind create-tts-provider.ts
  * when ready; no caller of ITTSProvider needs to change.
  */
-export class CartesiaProvider implements ITTSProvider {
+export class OpenAiTtsProvider implements ITTSProvider {
   constructor(private readonly credentials: TTSProviderCredentials) {
     void this.credentials;
   }
 
   synthesizeStream(_text: string, _options?: TTSStreamOptions): ITTSStream {
-    throw new AIProviderNotImplementedError("CartesiaProvider");
+    throw new AIProviderNotImplementedError("OpenAiTtsProvider");
   }
 }

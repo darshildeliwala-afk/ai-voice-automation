@@ -84,3 +84,59 @@ export class AIProviderApiError extends AIError {
     this.cause = cause;
   }
 }
+
+/** No SttProviderConfig row exists at all for this workspace (Sprint 17). */
+export class STTProviderConfigMissingError extends AIError {
+  constructor(workspaceId: string) {
+    super(
+      `No STT provider configuration found for workspace ${workspaceId}`,
+      "STT_PROVIDER_CONFIG_MISSING",
+    );
+  }
+}
+
+/** An SttProviderConfig row exists but is not the active one. */
+export class STTProviderInactiveError extends AIError {
+  constructor(workspaceId: string) {
+    super(
+      `STT provider for workspace ${workspaceId} is not active`,
+      "STT_PROVIDER_INACTIVE",
+    );
+  }
+}
+
+/** The STT streaming connection disconnected unexpectedly mid-call. */
+export class STTConnectionError extends AIError {
+  constructor(providerName: string, cause?: unknown) {
+    super(`${providerName} streaming connection failed`, "STT_CONNECTION_ERROR");
+    this.cause = cause;
+  }
+}
+
+/** No TtsProviderConfig row exists at all for this workspace (Sprint 17). */
+export class TTSProviderConfigMissingError extends AIError {
+  constructor(workspaceId: string) {
+    super(
+      `No TTS provider configuration found for workspace ${workspaceId}`,
+      "TTS_PROVIDER_CONFIG_MISSING",
+    );
+  }
+}
+
+/** A TtsProviderConfig row exists but is not the active one. */
+export class TTSProviderInactiveError extends AIError {
+  constructor(workspaceId: string) {
+    super(
+      `TTS provider for workspace ${workspaceId} is not active`,
+      "TTS_PROVIDER_INACTIVE",
+    );
+  }
+}
+
+/** The TTS provider failed to synthesize speech for a turn. */
+export class TTSSynthesisError extends AIError {
+  constructor(providerName: string, cause?: unknown) {
+    super(`${providerName} failed to synthesize speech`, "TTS_SYNTHESIS_ERROR");
+    this.cause = cause;
+  }
+}

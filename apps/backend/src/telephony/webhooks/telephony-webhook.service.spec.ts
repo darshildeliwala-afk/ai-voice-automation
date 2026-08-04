@@ -510,4 +510,54 @@ describe("TelephonyWebhookService", () => {
       expect(result).toBeNull();
     });
   });
+
+  describe("media stream (Sprint 17)", () => {
+    const ORIGINAL_BASE_URL = process.env.TELEPHONY_WEBHOOK_BASE_URL;
+
+    afterEach(() => {
+      if (ORIGINAL_BASE_URL === undefined) {
+        delete process.env.TELEPHONY_WEBHOOK_BASE_URL;
+      } else {
+        process.env.TELEPHONY_WEBHOOK_BASE_URL = ORIGINAL_BASE_URL;
+      }
+    });
+
+    it("passes a wss:// media-stream URL to buildAnswerResponse when TELEPHONY_WEBHOOK_BASE_URL is configured", async () => {
+      process.env.TELEPHONY_WEBHOOK_BASE_URL = "https://example.com/";
+      const { service, call, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(baseCallRow());
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(baseEvent());
+
+      await service.processWebhook({
+        callId: CALL_ID,
+        type: "answer",
+        url: "https://example.com/telephony/webhook",
+        headers: {},
+        body: {},
+      });
+
+      expect(fakeProvider.buildAnswerResponse).toHaveBeenCalledWith({
+        streamUrl: `wss://example.com/telephony/media-stream?callId=${CALL_ID}`,
+      });
+    });
+
+    it("passes an undefined streamUrl when TELEPHONY_WEBHOOK_BASE_URL is not configured", async () => {
+      delete process.env.TELEPHONY_WEBHOOK_BASE_URL;
+      const { service, call, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(baseCallRow());
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(baseEvent());
+
+      await service.processWebhook({
+        callId: CALL_ID,
+        type: "answer",
+        url: "https://example.com/telephony/webhook",
+        headers: {},
+        body: {},
+      });
+
+      expect(fakeProvider.buildAnswerResponse).toHaveBeenCalledWith({
+        streamUrl: undefined,
+      });
+    });
+  });
 });

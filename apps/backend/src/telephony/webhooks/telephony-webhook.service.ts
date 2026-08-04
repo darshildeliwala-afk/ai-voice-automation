@@ -99,17 +99,39 @@ export class TelephonyWebhookService {
         `Ignoring duplicate ${call.provider} webhook event ${event.eventKey} for call ${call.id}`,
       );
       return context.type === "answer"
-        ? provider.buildAnswerResponse()
+        ? provider.buildAnswerResponse({
+            streamUrl: this.buildMediaStreamUrl(call.id),
+          })
         : null;
     }
 
     await this.applyEventToCall(call, event);
 
     if (context.type === "answer") {
-      return provider.buildAnswerResponse();
+      return provider.buildAnswerResponse({
+        streamUrl: this.buildMediaStreamUrl(call.id),
+      });
     }
 
     return null;
+  }
+
+  /**
+   * wss:// URL Plivo's `<Stream>` verb connects to for real-time audio
+   * (Sprint 17). Derived from the same TELEPHONY_WEBHOOK_BASE_URL env var
+   * apps/worker already uses to build answerUrl/hangupUrl, so no new
+   * configuration is introduced. Returns undefined (falling back to the
+   * static placeholder answer response) when that env var isn't set,
+   * e.g. in local/test setups that haven't configured public webhook URLs.
+   */
+  private buildMediaStreamUrl(callId: string): string | undefined {
+    const base = process.env.TELEPHONY_WEBHOOK_BASE_URL;
+    if (!base) {
+      return undefined;
+    }
+
+    const wsBase = base.replace(/\/$/, "").replace(/^http/, "ws");
+    return `${wsBase}/telephony/media-stream?callId=${callId}`;
   }
 
   /**

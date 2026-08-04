@@ -50,6 +50,17 @@ export interface AnswerResponse {
   body: string;
 }
 
+export interface BuildAnswerResponseInput {
+  /**
+   * wss:// URL for a bidirectional Media Stream (Sprint 17 real-time voice
+   * engine). When provided, the answer response streams live audio to/from
+   * that URL instead of the static placeholder greeting. Omit to keep the
+   * pre-Sprint-17 static response (e.g. when the workspace hasn't
+   * configured STT/TTS providers yet).
+   */
+  streamUrl?: string;
+}
+
 export interface WebhookValidationInput {
   /** The exact public URL the provider was configured to call back to. */
   url: string;
@@ -92,10 +103,11 @@ export interface ICallProvider {
   ): NormalizedCallEvent;
   /**
    * Builds the response the provider expects when it hits our "answer"
-   * callback for a live call. No AI conversation engine exists yet (out of
-   * scope for this sprint) -- this returns a minimal, static placeholder so
-   * the call can be observed end-to-end (answered, optionally recorded,
-   * hung up) rather than dropped immediately for lack of a valid response.
+   * callback for a live call. With no `streamUrl`, returns a minimal,
+   * static placeholder so the call can be observed end-to-end (answered,
+   * optionally recorded, hung up) even when real-time voice isn't
+   * configured for the workspace. With a `streamUrl`, streams live audio
+   * to/from the AI conversation engine instead (Sprint 17).
    */
-  buildAnswerResponse(): AnswerResponse;
+  buildAnswerResponse(input?: BuildAnswerResponseInput): AnswerResponse;
 }

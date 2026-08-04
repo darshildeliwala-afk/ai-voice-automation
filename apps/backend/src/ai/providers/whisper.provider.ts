@@ -1,18 +1,25 @@
 import { AIProviderNotImplementedError } from "../errors/ai.errors";
+import type { STTProviderCredentials } from "../interfaces/stt-credentials.interface";
 import type {
   ISTTProvider,
-  TranscriptionInput,
-  TranscriptionResult,
+  ISTTStream,
+  STTStreamOptions,
 } from "../interfaces/stt-provider.interface";
 
 /**
- * Placeholder for OpenAI Whisper speech-to-text. Voice streaming (and
- * therefore any real STT integration) is out of scope for this sprint.
+ * Placeholder for Whisper streaming STT (Sprint 17). Not implemented this
+ * sprint -- OpenAI's Whisper API is not natively streaming (batch
+ * transcription of complete audio), so a real implementation needs a
+ * chunking/buffering strategy this sprint doesn't scope. Swap for a real
+ * implementation behind create-stt-provider.ts when ready; no caller of
+ * ISTTProvider needs to change.
  */
 export class WhisperProvider implements ISTTProvider {
-  transcribe(_input: TranscriptionInput): Promise<TranscriptionResult> {
-    return Promise.reject(
-      new AIProviderNotImplementedError("WhisperProvider"),
-    );
+  constructor(private readonly credentials: STTProviderCredentials) {
+    void this.credentials;
+  }
+
+  startStream(_options: STTStreamOptions): ISTTStream {
+    throw new AIProviderNotImplementedError("WhisperProvider");
   }
 }

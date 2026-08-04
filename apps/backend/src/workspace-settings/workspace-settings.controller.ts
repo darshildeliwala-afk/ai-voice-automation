@@ -5,9 +5,13 @@ import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { AuthenticatedUser } from "../auth/jwt.strategy";
 import { AiProviderConfigService } from "./ai-provider-config.service";
 import { UpdateAiProviderConfigDto } from "./dto/update-ai-provider-config.dto";
+import { UpdateSttProviderConfigDto } from "./dto/update-stt-provider-config.dto";
 import { UpdateTelephonyConfigDto } from "./dto/update-telephony-config.dto";
+import { UpdateTtsProviderConfigDto } from "./dto/update-tts-provider-config.dto";
 import { UpdateWorkspaceSettingsDto } from "./dto/update-workspace-settings.dto";
+import { SttProviderConfigService } from "./stt-provider-config.service";
 import { TelephonyConfigService } from "./telephony-config.service";
+import { TtsProviderConfigService } from "./tts-provider-config.service";
 import { WorkspaceSettingsService } from "./workspace-settings.service";
 
 @Controller("workspace-settings")
@@ -17,6 +21,8 @@ export class WorkspaceSettingsController {
     private readonly workspaceSettingsService: WorkspaceSettingsService,
     private readonly telephonyConfigService: TelephonyConfigService,
     private readonly aiProviderConfigService: AiProviderConfigService,
+    private readonly sttProviderConfigService: SttProviderConfigService,
+    private readonly ttsProviderConfigService: TtsProviderConfigService,
   ) {}
 
   @Get()
@@ -59,5 +65,31 @@ export class WorkspaceSettingsController {
     @Body() dto: UpdateAiProviderConfigDto,
   ) {
     return this.aiProviderConfigService.upsertConfig(user.workspaceId, dto);
+  }
+
+  @Get("stt-provider")
+  getSttProviderConfig(@CurrentUser() user: AuthenticatedUser) {
+    return this.sttProviderConfigService.getActiveConfig(user.workspaceId);
+  }
+
+  @Put("stt-provider")
+  updateSttProviderConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateSttProviderConfigDto,
+  ) {
+    return this.sttProviderConfigService.upsertConfig(user.workspaceId, dto);
+  }
+
+  @Get("tts-provider")
+  getTtsProviderConfig(@CurrentUser() user: AuthenticatedUser) {
+    return this.ttsProviderConfigService.getActiveConfig(user.workspaceId);
+  }
+
+  @Put("tts-provider")
+  updateTtsProviderConfig(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateTtsProviderConfigDto,
+  ) {
+    return this.ttsProviderConfigService.upsertConfig(user.workspaceId, dto);
   }
 }

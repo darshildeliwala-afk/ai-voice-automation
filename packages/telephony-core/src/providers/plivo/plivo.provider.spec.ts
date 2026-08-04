@@ -20,11 +20,15 @@ jest.mock("plivo", () => ({
     },
   })),
   validateSignature: (...args: unknown[]) => mockValidateSignature(...args),
-  Response: jest.fn().mockImplementation(() => ({
-    addSpeak: jest.fn(),
-    addRecord: jest.fn(),
-    toXML: () => "<Response><Speak>stub</Speak></Response>",
-  })),
+  Response: jest.fn().mockImplementation(() => {
+    const elements: string[] = [];
+    return {
+      addSpeak: (body: string) => elements.push(`<Speak>${body}</Speak>`),
+      addRecord: () => elements.push("<Record/>"),
+      addStream: (body: string) => elements.push(`<Stream>${body}</Stream>`),
+      toXML: () => `<Response>${elements.join("")}</Response>`,
+    };
+  }),
 }));
 
 // eslint-disable-next-line import/first
@@ -280,13 +284,32 @@ describe("PlivoProvider", () => {
   });
 
   describe("buildAnswerResponse", () => {
-    it("returns XML content for Plivo's answer_url callback", () => {
+    it("returns the static placeholder XML when no streamUrl is given", () => {
       const provider = new PlivoProvider(CREDENTIALS);
 
       const response = provider.buildAnswerResponse();
 
       expect(response.contentType).toBe("text/xml");
       expect(response.body).toContain("<Response>");
+      expect(response.body).toContain("<Speak");
+      expect(response.body).toContain("<Record");
+      expect(response.body).not.toContain("<Stream");
+    });
+
+    it("returns a bidirectional <Stream> element when a streamUrl is given", () => {
+      const provider = new PlivoProvider(CREDENTIALS);
+
+      const response = provider.buildAnswerResponse({
+        streamUrl: "wss://example.com/telephony/media-stream?callId=call-1",
+      });
+
+      expect(response.contentType).toBe("text/xml");
+      expect(response.body).toContain("<Stream");
+      expect(response.body).toContain(
+        "wss://example.com/telephony/media-stream?callId=call-1",
+      );
+      expect(response.body).not.toContain("<Speak");
+      expect(response.body).not.toContain("<Record");
     });
   });
 });

@@ -121,6 +121,17 @@ enum WorkflowNodeType {
   CALLBACK
 }
 
+enum SttProvider {
+  DEEPGRAM
+  WHISPER
+}
+
+enum TtsProvider {
+  ELEVENLABS
+  OPENAI
+  CARTESIA
+}
+
 model Workspace {
   id                     String                  @id @default(uuid()) @db.Uuid
   name                   String
@@ -144,6 +155,8 @@ model Workspace {
   conversations          Conversation[]
   aiUsageRecords         AIUsage[]
   workflows              Workflow[]
+  sttProviderConfigs     SttProviderConfig[]
+  ttsProviderConfigs     TtsProviderConfig[]
 
   @@index([deletedAt])
 }
@@ -569,6 +582,44 @@ model AiProviderConfig {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+}
+
+/// Streaming speech-to-text provider credentials for a workspace (Sprint 17
+/// real-time voice engine). Same insert-only + isActive pattern as
+/// AiProviderConfig/TelephonyConfig -- `apiKey` is encrypted at rest and
+/// never returned by any API.
+model SttProviderConfig {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @db.Uuid
+  provider    SttProvider
+  apiKey      String
+  language    String      @default("en")
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, isActive])
+}
+
+/// Streaming text-to-speech provider credentials for a workspace (Sprint 17
+/// real-time voice engine). Same insert-only + isActive pattern as
+/// AiProviderConfig/TelephonyConfig -- `apiKey` is encrypted at rest and
+/// never returned by any API.
+model TtsProviderConfig {
+  id          String      @id @default(uuid()) @db.Uuid
+  workspaceId String      @db.Uuid
+  provider    TtsProvider
+  apiKey      String
+  voice       String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId])
   @@index([workspaceId, isActive])
