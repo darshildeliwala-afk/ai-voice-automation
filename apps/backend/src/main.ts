@@ -1,5 +1,6 @@
 import { ValidationPipe } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 
 import { AppModule } from "./app.module";
 import { attachMediaStreamServer } from "./media-stream/media-stream.bootstrap";
@@ -20,6 +21,19 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
     }),
+  );
+
+  // Sprint 20 admin portal API docs.
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle("AI Voice Automation -- Admin Portal API")
+    .setDescription("Sprint 20 admin portal backend API")
+    .setVersion("1.0")
+    .addBearerAuth()
+    .build();
+  SwaggerModule.setup(
+    "api-docs",
+    app,
+    SwaggerModule.createDocument(app, swaggerConfig),
   );
 
   // Sprint 18 real-time Session Orchestrator -- raw Plivo Media Streams

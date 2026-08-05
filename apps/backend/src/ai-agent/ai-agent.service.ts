@@ -7,7 +7,12 @@ import {
   type PaginationMeta,
 } from "../common/pagination/pagination.util";
 import { PrismaService } from "../common/prisma/prisma.service";
-import { Prisma, type AiAgent } from "../generated/prisma/client";
+import {
+  Prisma,
+  type AiAgent,
+  type AiAgentVoicePersonaOverride,
+  type Workflow,
+} from "../generated/prisma/client";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { CreateAiAgentDto } from "./dto/create-ai-agent.dto";
 import { UpdateAiAgentDto } from "./dto/update-ai-agent.dto";
@@ -16,6 +21,12 @@ export interface PaginatedAiAgents {
   data: AiAgent[];
   meta: PaginationMeta;
 }
+
+/** Superset of AiAgent -- getAiAgentById's detail response (Sprint 20) also surfaces the Sprint 18 persona override and the agent's workflow versions, ordered so index 0 is the active published one if any. */
+export type AiAgentWithRelations = AiAgent & {
+  voicePersonaOverride: AiAgentVoicePersonaOverride | null;
+  workflows: Workflow[];
+};
 
 @Injectable()
 export class AiAgentService extends BaseService {
@@ -38,10 +49,18 @@ export class AiAgentService extends BaseService {
     return this.prisma.aiAgent.create({ data: dto });
   }
 
-  async getAiAgentById(id: string): Promise<AiAgent> {
+  /** Detail response (Sprint 20) -- widened beyond the bare AiAgent row to also surface the Sprint 18 voice-persona override and the agent's workflow versions (index 0 = active published version if any); listAiAgents stays unchanged/cheap. */
+  async getAiAgentById(id: string): Promise<AiAgentWithRelations> {
     const agent = this.throwIfNotFound(
       await this.prisma.aiAgent.findFirst({
         where: this.applySoftDelete({ id }),
+        include: {
+          voicePersonaOverride: true,
+          workflows: {
+            where: { deletedAt: null },
+            orderBy: [{ isActive: "desc" }, { version: "desc" }],
+          },
+        },
       }),
       "AI Agent",
       id,

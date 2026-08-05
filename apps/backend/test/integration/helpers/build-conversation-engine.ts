@@ -4,7 +4,10 @@ import { PromptBuilderService } from "../../../src/ai/prompt/prompt-builder.serv
 import { CallQueueService } from "../../../src/call-queue/call-queue.service";
 import { EncryptionService } from "../../../src/common/encryption/encryption.service";
 import { PrismaService } from "../../../src/common/prisma/prisma.service";
+import { CallSummaryService } from "../../../src/conversation-engine/call-summary.service";
 import { ConversationEngineService } from "../../../src/conversation-engine/conversation-engine.service";
+import { LanguageDetectionService } from "../../../src/conversation-engine/language-detection.service";
+import { SentimentAnalysisService } from "../../../src/conversation-engine/sentiment-analysis.service";
 import { AIToolExecutor } from "../../../src/conversation-engine/tools/ai-tool-executor";
 import { AIToolRegistry } from "../../../src/conversation-engine/tools/ai-tool-registry";
 import { CreateCallbackTool } from "../../../src/conversation-engine/tools/create-callback.tool";
@@ -13,6 +16,7 @@ import { LookupCustomerTool } from "../../../src/conversation-engine/tools/looku
 import { LookupOrderTool } from "../../../src/conversation-engine/tools/lookup-order.tool";
 import { SearchKnowledgeBaseTool } from "../../../src/conversation-engine/tools/search-knowledge-base.tool";
 import { TransferToHumanTool } from "../../../src/conversation-engine/tools/transfer-to-human.tool";
+import { CrmNoteService } from "../../../src/crm-note/crm-note.service";
 import { CustomerService } from "../../../src/customer/customer.service";
 import { KnowledgeBaseService } from "../../../src/knowledge-base/knowledge-base.service";
 import { OrderService } from "../../../src/order/order.service";
@@ -27,6 +31,7 @@ import { WorkflowNodeHandlerRegistry } from "../../../src/workflow/engine/workfl
 import { WorkflowValidatorService } from "../../../src/workflow/validator/workflow-validator.service";
 import { WorkflowService } from "../../../src/workflow/workflow.service";
 import { AiProviderConfigService } from "../../../src/workspace-settings/ai-provider-config.service";
+import { VoicePersonaConfigService } from "../../../src/workspace-settings/voice-persona-config.service";
 import { WorkspaceSettingsService } from "../../../src/workspace-settings/workspace-settings.service";
 import { WorkspaceService } from "../../../src/workspace/workspace.service";
 
@@ -53,6 +58,7 @@ export function buildConversationEngineTestChain(prisma: PrismaService) {
     encryptionService,
   );
   const providerFactory = new AIProviderFactory(aiProviderConfigService);
+  const voicePersonaConfigService = new VoicePersonaConfigService(prisma, workspaceService);
   const promptBuilder = new PromptBuilderService(
     prisma,
     workspaceSettingsService,
@@ -60,14 +66,23 @@ export function buildConversationEngineTestChain(prisma: PrismaService) {
     knowledgeBaseService,
     customerService,
     orderService,
+    voicePersonaConfigService,
   );
+  const crmNoteService = new CrmNoteService(prisma, customerService);
+  const sentimentAnalysisService = new SentimentAnalysisService();
+  const callSummaryService = new CallSummaryService(
+    prisma,
+    providerFactory,
+    sentimentAnalysisService,
+  );
+  const languageDetectionService = new LanguageDetectionService();
 
   const toolRegistry = new AIToolRegistry([
-    new LookupCustomerTool(customerService),
-    new LookupOrderTool(orderService),
+    new LookupCustomerTool(customerService, prisma, orderService, crmNoteService),
+    new LookupOrderTool(orderService, customerService),
     new SearchKnowledgeBaseTool(knowledgeBaseService),
-    new EndCallTool(prisma),
-    new TransferToHumanTool(),
+    new EndCallTool(prisma, callSummaryService),
+    new TransferToHumanTool(prisma),
     new CreateCallbackTool(callQueueService),
   ]);
   const toolExecutor = new AIToolExecutor(toolRegistry);
@@ -101,6 +116,7 @@ export function buildConversationEngineTestChain(prisma: PrismaService) {
     aiProviderConfigService,
     workflowService,
     workflowExecutionEngine,
+    languageDetectionService,
   );
 
   return {
@@ -113,5 +129,8 @@ export function buildConversationEngineTestChain(prisma: PrismaService) {
     aiProviderConfigService,
     workflowService,
     conversationEngine,
+    crmNoteService,
+    callSummaryService,
+    voicePersonaConfigService,
   };
 }

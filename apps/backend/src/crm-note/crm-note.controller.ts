@@ -11,12 +11,14 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { CrmNoteService } from "./crm-note.service";
 import { CreateCrmNoteDto } from "./dto/create-crm-note.dto";
 import { ListCrmNotesQueryDto } from "./dto/list-crm-notes-query.dto";
 import { UpdateCrmNoteDto } from "./dto/update-crm-note.dto";
 
+@ApiTags("crm-notes")
 @Controller("crm-notes")
 export class CrmNoteController {
   constructor(private readonly crmNoteService: CrmNoteService) {}

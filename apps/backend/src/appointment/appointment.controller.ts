@@ -11,12 +11,14 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { AppointmentService } from "./appointment.service";
 import { CreateAppointmentDto } from "./dto/create-appointment.dto";
 import { ListAppointmentsQueryDto } from "./dto/list-appointments-query.dto";
 import { UpdateAppointmentDto } from "./dto/update-appointment.dto";
 
+@ApiTags("appointments")
 @Controller("appointments")
 export class AppointmentController {
   constructor(private readonly appointmentService: AppointmentService) {}

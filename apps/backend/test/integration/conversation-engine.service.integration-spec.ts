@@ -249,12 +249,18 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
   });
 
   it("stops the loop on a terminal tool result (end_call) and marks the conversation COMPLETED", async () => {
-    mockCreate.mockResolvedValueOnce(
-      openAiResponse({
-        content: "Glad I could help, goodbye!",
-        toolCalls: [{ id: "call_1", name: "end_call", args: { reason: "resolved" } }],
-      }),
-    );
+    mockCreate
+      .mockResolvedValueOnce(
+        openAiResponse({
+          content: "Glad I could help, goodbye!",
+          toolCalls: [{ id: "call_1", name: "end_call", args: { reason: "resolved" } }],
+        }),
+      )
+      // end_call triggers Sprint 19 automatic call-summary generation, a
+      // second real chat completion over the transcript.
+      .mockResolvedValueOnce(
+        openAiResponse({ content: JSON.stringify({ reason: "resolved", callbackRequired: false }) }),
+      );
 
     const result = await service.processMessage({
       workspaceId,
@@ -264,7 +270,7 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
       message: "That's all, thanks!",
     });
 
-    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreate).toHaveBeenCalledTimes(2);
     expect(result.toolCallsExecuted).toEqual(["end_call"]);
 
     const conversation = await prisma.conversation.findUniqueOrThrow({
@@ -370,11 +376,16 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
       expect(mockCreate).toHaveBeenCalledTimes(1);
       expect(result.content).toBe("Let me check that for you.");
       expect(result.toolCallsExecuted).toEqual(["lookup_order", "transfer_to_human"]);
+      // Sprint 20 Live Call API -- lastNodeKey should be the HUMAN_TRANSFER
+      // node that actually ran, not "route" (which handed off to it).
+      expect(result.lastNodeKey).toBe("transfer");
 
       const conversation = await prisma.conversation.findUniqueOrThrow({
         where: { id: result.conversationId },
       });
-      expect(conversation.status).toBe("ACTIVE");
+      // Sprint 19's transfer_to_human tool flips the conversation to
+      // WAITING_FOR_HUMAN rather than leaving it ACTIVE.
+      expect(conversation.status).toBe("WAITING_FOR_HUMAN");
 
       const messages = await prisma.conversationMessage.findMany({
         where: { conversationId: result.conversationId },
@@ -447,6 +458,9 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
       });
 
       expect(result.toolCallsExecuted).toEqual(["lookup_order", "end_call"]);
+      // Sprint 20 Live Call API -- lastNodeKey is the END node that
+      // actually terminated the run.
+      expect(result.lastNodeKey).toBe("wrap_up");
 
       const conversation = await prisma.conversation.findUniqueOrThrow({
         where: { id: result.conversationId },

@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Put, UseGuards } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -16,6 +17,7 @@ import { TtsProviderConfigService } from "./tts-provider-config.service";
 import { VoicePersonaConfigService } from "./voice-persona-config.service";
 import { WorkspaceSettingsService } from "./workspace-settings.service";
 
+@ApiTags("workspace-settings")
 @Controller("workspace-settings")
 @UseGuards(JwtAuthGuard)
 export class WorkspaceSettingsController {

@@ -331,6 +331,31 @@ describe("ConversationEngineService", () => {
       expect(result.toolCallsExecuted).toEqual(["lookup_order"]);
       expect(result.totalTokens).toBe(55);
     });
+
+    it("propagates lastNodeKey from the workflow engine's result (Sprint 20 Live Call API)", async () => {
+      const { service, conversation, workflowExecutionEngine } = setup();
+      conversation.create.mockResolvedValue({ id: "conv-new" });
+      workflowExecutionEngine.execute.mockResolvedValue({
+        content: "Your order shipped.",
+        toolCallsExecuted: [],
+        provider: "OPENAI",
+        model: "gpt-4o-mini",
+        promptTokens: 10,
+        completionTokens: 5,
+        totalTokens: 15,
+        estimatedCost: 0.001,
+        stepsExecuted: 1,
+        lastNodeKey: "lookup_order_node",
+      });
+
+      const result = await service.processMessage({
+        workspaceId: WORKSPACE_ID,
+        customerId: CUSTOMER_ID,
+        message: "Where's my order?",
+      });
+
+      expect(result.lastNodeKey).toBe("lookup_order_node");
+    });
   });
 
   describe("language detection (Sprint 18)", () => {

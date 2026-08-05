@@ -13,8 +13,14 @@ const ORDER_ID = "order-1";
 const CUSTOMER_ID = "customer-1";
 
 function setup() {
-  const call = { create: jest.fn(), findFirst: jest.fn() };
-  const prisma = { call };
+  const call = {
+    create: jest.fn(),
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
+  };
+  const liveCallState = { findMany: jest.fn() };
+  const prisma = { call, liveCallState };
 
   const orderService = {
     getOrderById: jest.fn().mockResolvedValue({
@@ -247,6 +253,155 @@ describe("TelephonyService", () => {
       await expect(
         service.getCallById(WORKSPACE_ID, "missing"),
       ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("listLiveCalls", () => {
+    it("maps LiveCallState rows into flat live-call summaries", async () => {
+      const { service, prisma } = setup();
+      const startedAt = new Date(Date.now() - 45_000);
+      prisma.liveCallState.findMany.mockResolvedValue([
+        {
+          callId: "call-1",
+          currentWorkflowNodeKey: "lookup_order_node",
+          speakingParty: "AI",
+          aiStatus: "SPEAKING",
+          lastTranscriptSnippet: "Mera order kahan hai?",
+          call: {
+            startedAt,
+            phoneNumber: "+14155551234",
+            customer: { name: "Jane Doe" },
+          },
+        },
+      ]);
+
+      const result = await service.listLiveCalls(WORKSPACE_ID);
+
+      expect(prisma.liveCallState.findMany).toHaveBeenCalledWith({
+        where: { workspaceId: WORKSPACE_ID },
+        include: { call: { include: { customer: true } } },
+      });
+      expect(result).toEqual([
+        expect.objectContaining({
+          callId: "call-1",
+          customerName: "Jane Doe",
+          phoneNumber: "+14155551234",
+          currentWorkflowNodeKey: "lookup_order_node",
+          speakingParty: "AI",
+          aiStatus: "SPEAKING",
+          lastTranscriptSnippet: "Mera order kahan hai?",
+          callStartedAt: startedAt.toISOString(),
+        }),
+      ]);
+      expect(result[0].durationSeconds).toBeGreaterThanOrEqual(45);
+    });
+
+    it("returns 0 duration and null callStartedAt when the call hasn't started yet", async () => {
+      const { service, prisma } = setup();
+      prisma.liveCallState.findMany.mockResolvedValue([
+        {
+          callId: "call-1",
+          currentWorkflowNodeKey: null,
+          speakingParty: "SILENCE",
+          aiStatus: "LISTENING",
+          lastTranscriptSnippet: null,
+          call: { startedAt: null, phoneNumber: "+14155551234", customer: { name: "Jane Doe" } },
+        },
+      ]);
+
+      const result = await service.listLiveCalls(WORKSPACE_ID);
+
+      expect(result[0]).toMatchObject({ callStartedAt: null, durationSeconds: 0 });
+    });
+  });
+
+  describe("listCalls", () => {
+    it("scopes to the workspace and paginates", async () => {
+      const { service, prisma } = setup();
+      prisma.call.findMany.mockResolvedValue([]);
+      prisma.call.count.mockResolvedValue(0);
+
+      await service.listCalls(WORKSPACE_ID, { page: 1, limit: 20 }, {});
+
+      expect(prisma.call.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { workspaceId: WORKSPACE_ID },
+          include: { customer: true },
+        }),
+      );
+    });
+
+    it("applies status/direction/customerId/search/date-range filters", async () => {
+      const { service, prisma } = setup();
+      prisma.call.findMany.mockResolvedValue([]);
+      prisma.call.count.mockResolvedValue(0);
+
+      await service.listCalls(
+        WORKSPACE_ID,
+        { page: 1, limit: 20 },
+        {
+          status: CallStatus.COMPLETED,
+          direction: CallDirection.OUTBOUND,
+          customerId: CUSTOMER_ID,
+          search: "4155",
+          dateFrom: "2026-08-01",
+          dateTo: "2026-08-05",
+        },
+      );
+
+      expect(prisma.call.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            workspaceId: WORKSPACE_ID,
+            status: CallStatus.COMPLETED,
+            direction: CallDirection.OUTBOUND,
+            customerId: CUSTOMER_ID,
+            phoneNumber: { contains: "4155", mode: "insensitive" },
+            startedAt: { gte: new Date("2026-08-01"), lte: new Date("2026-08-05") },
+          },
+        }),
+      );
+    });
+
+    it("maps rows to flat, export-ready JSON (customer name flattened, no nested Prisma types)", async () => {
+      const { service, prisma } = setup();
+      prisma.call.findMany.mockResolvedValue([
+        {
+          id: "call-1",
+          customerId: CUSTOMER_ID,
+          customer: { name: "Jane Doe" },
+          phoneNumber: "+14155551234",
+          status: CallStatus.COMPLETED,
+          direction: CallDirection.OUTBOUND,
+          provider: "PLIVO",
+          startedAt: new Date("2026-08-01T00:00:00Z"),
+          answeredAt: new Date("2026-08-01T00:00:05Z"),
+          endedAt: new Date("2026-08-01T00:05:00Z"),
+          durationSeconds: 295,
+          hangupReason: "normal",
+          recordingUrl: "https://example.com/rec.mp3",
+        },
+      ]);
+      prisma.call.count.mockResolvedValue(1);
+
+      const result = await service.listCalls(WORKSPACE_ID, { page: 1, limit: 20 }, {});
+
+      expect(result.data[0]).toEqual({
+        id: "call-1",
+        customerId: CUSTOMER_ID,
+        customerName: "Jane Doe",
+        phoneNumber: "+14155551234",
+        status: CallStatus.COMPLETED,
+        direction: CallDirection.OUTBOUND,
+        provider: "PLIVO",
+        startedAt: "2026-08-01T00:00:00.000Z",
+        answeredAt: "2026-08-01T00:00:05.000Z",
+        endedAt: "2026-08-01T00:05:00.000Z",
+        durationSeconds: 295,
+        hangupReason: "normal",
+        recordingUrl: "https://example.com/rec.mp3",
+      });
+      expect(result.meta.total).toBe(1);
     });
   });
 

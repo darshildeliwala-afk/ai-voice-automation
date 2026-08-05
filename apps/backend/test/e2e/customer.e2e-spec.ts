@@ -142,6 +142,34 @@ describe("Customer (e2e, real HTTP + auth)", () => {
       .expect(404);
   });
 
+  it("GET /customers/:id/profile returns the aggregate profile (Sprint 20)", async () => {
+    const res = await request(app.getHttpServer())
+      .get(`/customers/${createdId}/profile`)
+      .set("Authorization", `Bearer ${token}`)
+      .expect(200);
+
+    expect(res.body.customer.id).toBe(createdId);
+    expect(res.body.orders).toEqual([]);
+    expect(res.body.crmNotes).toEqual([]);
+    expect(res.body.appointments).toEqual([]);
+    expect(res.body.callbacks).toEqual([]);
+    expect(res.body.conversations).toEqual([]);
+  });
+
+  it("GET /customers/:id/profile 404s when requested from a different workspace", async () => {
+    const otherToken = await jwtService.signAsync({
+      sub: randomUUID(),
+      email: "irrelevant@example.com",
+      workspaceId: otherWorkspaceId,
+      role: "ADMIN",
+    });
+
+    await request(app.getHttpServer())
+      .get(`/customers/${createdId}/profile`)
+      .set("Authorization", `Bearer ${otherToken}`)
+      .expect(404);
+  });
+
   it("PATCH /customers/:id updates the customer", async () => {
     const res = await request(app.getHttpServer())
       .patch(`/customers/${createdId}`)

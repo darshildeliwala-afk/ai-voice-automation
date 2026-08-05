@@ -10,6 +10,7 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import { ApiTags } from "@nestjs/swagger";
 
 import { ExecuteImportDto } from "./dto/execute-import.dto";
 import { UploadImportDto } from "./dto/upload-import.dto";
@@ -19,6 +20,7 @@ import type { UploadedImportFile } from "./parsing/file-parser";
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
+@ApiTags("imports")
 @Controller("imports")
 export class ImportsController {
   constructor(private readonly importsService: ImportsService) {}

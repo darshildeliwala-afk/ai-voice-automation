@@ -7,7 +7,16 @@ import {
   type PaginationMeta,
 } from "../common/pagination/pagination.util";
 import { PrismaService } from "../common/prisma/prisma.service";
-import { Prisma, type Customer } from "../generated/prisma/client";
+import {
+  Prisma,
+  type Appointment,
+  type CallQueue,
+  type Conversation,
+  type ConversationSummary,
+  type CrmNote,
+  type Customer,
+  type Order,
+} from "../generated/prisma/client";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { CreateCustomerDto } from "./dto/create-customer.dto";
 import { UpdateCustomerDto } from "./dto/update-customer.dto";
@@ -15,6 +24,16 @@ import { UpdateCustomerDto } from "./dto/update-customer.dto";
 export interface PaginatedCustomers {
   data: Customer[];
   meta: PaginationMeta;
+}
+
+export interface CustomerProfile {
+  customer: Customer;
+  orders: Order[];
+  crmNotes: CrmNote[];
+  appointments: Appointment[];
+  /** CallQueue rows with a non-null `reason` -- Sprint 19's create_callback tool is what sets `reason`, so this is exactly "requested callbacks," scoped through the customer's own orders (CallQueue has no customerId column). */
+  callbacks: CallQueue[];
+  conversations: (Conversation & { summary: ConversationSummary | null })[];
 }
 
 @Injectable()
@@ -47,6 +66,46 @@ export class CustomerService extends BaseService {
       "Customer",
       id,
     );
+  }
+
+  /**
+   * Admin Customer Profile API (Sprint 20) -- aggregates everything the
+   * dashboard needs about one customer in a single response: orders,
+   * CRM notes, appointments, requested callbacks, and conversation
+   * history (with each conversation's Sprint 19 summary attached).
+   * CallQueue has no `customerId` column (only `orderId`), so callbacks
+   * are correctly joined through the customer's own orders, never a
+   * nonexistent `customerId` filter.
+   */
+  async getCustomerProfile(
+    workspaceId: string,
+    customerId: string,
+  ): Promise<CustomerProfile> {
+    const customer = await this.getCustomerById(workspaceId, customerId);
+
+    const orders = await this.prisma.order.findMany({
+      where: { workspaceId, customerId },
+    });
+    const orderIds = orders.map((order) => order.id);
+
+    const [crmNotes, appointments, callbacks, conversations] = await Promise.all([
+      this.prisma.crmNote.findMany({
+        where: { workspaceId, customerId, deletedAt: null },
+      }),
+      this.prisma.appointment.findMany({
+        where: { workspaceId, customerId, deletedAt: null },
+      }),
+      this.prisma.callQueue.findMany({
+        where: { orderId: { in: orderIds }, reason: { not: null } },
+      }),
+      this.prisma.conversation.findMany({
+        where: { workspaceId, customerId },
+        include: { summary: true },
+        orderBy: { createdAt: "desc" },
+      }),
+    ]);
+
+    return { customer, orders, crmNotes, appointments, callbacks, conversations };
   }
 
   /**

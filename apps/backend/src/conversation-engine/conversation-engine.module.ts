@@ -7,6 +7,8 @@ import { OrderModule } from "../order/order.module";
 import { WorkflowModule } from "../workflow/workflow.module";
 import { WorkspaceSettingsModule } from "../workspace-settings/workspace-settings.module";
 import { WorkspaceModule } from "../workspace/workspace.module";
+import { ConversationController } from "./conversation.controller";
+import { ConversationService } from "./conversation.service";
 import { ConversationEngineService } from "./conversation-engine.service";
 import { LanguageDetectionService } from "./language-detection.service";
 
@@ -20,7 +22,8 @@ import { LanguageDetectionService } from "./language-detection.service";
     AiAgentModule,
     WorkflowModule,
   ],
-  providers: [ConversationEngineService, LanguageDetectionService],
+  controllers: [ConversationController],
+  providers: [ConversationEngineService, LanguageDetectionService, ConversationService],
   exports: [ConversationEngineService],
 })
 export class ConversationEngineModule {}

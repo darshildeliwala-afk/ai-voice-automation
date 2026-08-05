@@ -77,6 +77,10 @@ function setup(personaOverrides: Partial<typeof PERSONA> = {}) {
     conversationMessage: {
       findFirst: jest.fn().mockResolvedValue({ content: "Namaste! Main kaise madad karu?" }),
     },
+    liveCallState: {
+      upsert: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({}),
+    },
   };
 
   const callQueueService = {
@@ -354,6 +358,110 @@ describe("MediaSession", () => {
 
       expect(synthesizeStream).not.toHaveBeenCalled();
       expect(secondSignal?.aborted).toBe(false); // the stale turn's cleanup didn't touch it
+    });
+  });
+
+  describe("live call state (Sprint 20 admin Live Call API)", () => {
+    it("seeds LiveCallState (LISTENING/SILENCE) on start, then flips to SPEAKING/AI before the greeting plays", async () => {
+      const { session, prisma } = setup();
+
+      session.handleMessage(startEvent());
+      await flush();
+
+      expect(prisma.liveCallState.upsert).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          where: { callId: CALL_ID },
+          create: expect.objectContaining({
+            callId: CALL_ID,
+            workspaceId: WORKSPACE_ID,
+            speakingParty: "SILENCE",
+            aiStatus: "LISTENING",
+          }),
+        }),
+      );
+      expect(prisma.liveCallState.upsert).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          create: expect.objectContaining({ speakingParty: "AI", aiStatus: "SPEAKING" }),
+        }),
+      );
+    });
+
+    it("flips to CUSTOMER/LISTENING on barge-in", async () => {
+      const { session, prisma, sttStream, ttsStreams } = setup();
+
+      session.handleMessage(startEvent());
+      await flush();
+      expect(ttsStreams).toHaveLength(1); // greeting is playing
+      prisma.liveCallState.upsert.mockClear();
+
+      sttStream.emitTranscript({ text: "wait wait", isFinal: false });
+
+      expect(prisma.liveCallState.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          update: expect.objectContaining({ speakingParty: "CUSTOMER", aiStatus: "LISTENING" }),
+        }),
+      );
+    });
+
+    it("flips to THINKING/SILENCE while a turn is being processed, then records the resulting workflow node", async () => {
+      const { session, sttStream, prisma, conversationEngine } = setup();
+      prisma.conversationMessage.findFirst.mockResolvedValue(null); // isolate to the turn
+      session.handleMessage(startEvent());
+      await flush();
+      prisma.liveCallState.upsert.mockClear();
+      conversationEngine.processMessage.mockResolvedValue({
+        conversationId: "conv-1",
+        content: "Aapka order kal deliver hoga.",
+        resolvedLanguage: "hi-en",
+        lastNodeKey: "lookup_order_node",
+      });
+
+      sttStream.emitTranscript({ text: "Mera order kahan hai?", isFinal: true });
+      await flush();
+
+      expect(prisma.liveCallState.upsert).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          update: expect.objectContaining({
+            aiStatus: "THINKING",
+            speakingParty: "SILENCE",
+            lastTranscriptSnippet: "Mera order kahan hai?",
+          }),
+        }),
+      );
+      expect(prisma.liveCallState.upsert).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          update: expect.objectContaining({ currentWorkflowNodeKey: "lookup_order_node" }),
+        }),
+      );
+    });
+
+    it("deletes the live call state row on close", async () => {
+      const { session, prisma } = setup();
+
+      session.handleMessage(startEvent());
+      await flush();
+
+      session.handleMessage(JSON.stringify({ event: "stop" }));
+
+      expect(prisma.liveCallState.deleteMany).toHaveBeenCalledWith({
+        where: { callId: CALL_ID },
+      });
+    });
+
+    it("a live-state write failure never breaks the call (fire-and-forget, only logged)", async () => {
+      const { session, prisma } = setup();
+      prisma.liveCallState.upsert.mockRejectedValue(new Error("db down"));
+
+      session.handleMessage(startEvent());
+      await flush();
+
+      // No throw propagated -- the greeting still gets synthesized despite
+      // every live-state write failing.
+      expect(prisma.call.findFirst).toHaveBeenCalled();
     });
   });
 

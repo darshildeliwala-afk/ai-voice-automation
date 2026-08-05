@@ -12,6 +12,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -22,6 +23,7 @@ import { CreateCustomerDto } from "./dto/create-customer.dto";
 import { ListCustomersQueryDto } from "./dto/list-customers-query.dto";
 import { UpdateCustomerDto } from "./dto/update-customer.dto";
 
+@ApiTags("customers")
 @Controller("customers")
 @UseGuards(JwtAuthGuard)
 export class CustomerController {
@@ -65,6 +67,15 @@ export class CustomerController {
     @Param("id", ParseUUIDPipe) id: string,
   ) {
     return this.customerService.getCustomerById(user.workspaceId, id);
+  }
+
+  /** Aggregate profile (Sprint 20): orders, CRM notes, appointments, requested callbacks, and conversation history in one response. */
+  @Get(":id/profile")
+  getProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return this.customerService.getCustomerProfile(user.workspaceId, id);
   }
 
   @Patch(":id")

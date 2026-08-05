@@ -111,6 +111,7 @@ describe("TelephonyService (integration, real Postgres)", () => {
   });
 
   afterAll(async () => {
+    await prisma.liveCallState.deleteMany({ where: { workspaceId } });
     await prisma.call.deleteMany({ where: { workspaceId } });
     await prisma.telephonyConfig.deleteMany({ where: { workspaceId } });
     await prisma.callQueue.deleteMany({ where: { orderId } });
@@ -177,6 +178,74 @@ describe("TelephonyService (integration, real Postgres)", () => {
     await expect(
       service.getCallById(randomUUID(), created.callId),
     ).rejects.toThrow();
+  });
+
+  describe("listLiveCalls (Sprint 20)", () => {
+    it("returns only calls with a LiveCallState row, mapped with computed duration", async () => {
+      const created = await service.createCall(workspaceId, { queueId, customerId });
+      await prisma.call.update({
+        where: { id: created.callId },
+        data: { startedAt: new Date(Date.now() - 5000) },
+      });
+      await prisma.liveCallState.create({
+        data: {
+          callId: created.callId,
+          workspaceId,
+          currentWorkflowNodeKey: "greet",
+          speakingParty: "AI",
+          aiStatus: "SPEAKING",
+          lastTranscriptSnippet: "Hello there",
+        },
+      });
+
+      const liveCalls = await service.listLiveCalls(workspaceId);
+
+      const match = liveCalls.find((c) => c.callId === created.callId);
+      expect(match).toBeDefined();
+      expect(match?.customerName).toBe("IT Customer");
+      expect(match?.currentWorkflowNodeKey).toBe("greet");
+      expect(match?.speakingParty).toBe("AI");
+      expect(match?.aiStatus).toBe("SPEAKING");
+      expect(match?.durationSeconds).toBeGreaterThanOrEqual(5);
+
+      await prisma.liveCallState.deleteMany({ where: { callId: created.callId } });
+    });
+  });
+
+  describe("listCalls (Sprint 20 call history)", () => {
+    it("filters by status and paginates, scoped to the workspace", async () => {
+      const created = await service.createCall(workspaceId, { queueId, customerId });
+      await prisma.call.update({
+        where: { id: created.callId },
+        data: { status: "COMPLETED" as never, durationSeconds: 42 },
+      });
+
+      const result = await service.listCalls(
+        workspaceId,
+        { page: 1, limit: 20 },
+        { status: "COMPLETED" as never },
+      );
+
+      const match = result.data.find((c) => c.id === created.callId);
+      expect(match).toBeDefined();
+      expect(match?.status).toBe("COMPLETED");
+      expect(match?.durationSeconds).toBe(42);
+      expect(match?.customerName).toBe("IT Customer");
+      expect(result.meta.total).toBeGreaterThanOrEqual(1);
+    });
+
+    it("search filters by phone number, case-insensitive", async () => {
+      await service.createCall(workspaceId, { queueId, customerId });
+
+      const result = await service.listCalls(
+        workspaceId,
+        { page: 1, limit: 20 },
+        { search: "4155559000" },
+      );
+
+      expect(result.data.length).toBeGreaterThanOrEqual(1);
+      expect(result.data.every((c) => c.phoneNumber.includes("4155559000"))).toBe(true);
+    });
   });
 
   it("throws TelephonyConfigMissingError when the workspace has no telephony config", async () => {

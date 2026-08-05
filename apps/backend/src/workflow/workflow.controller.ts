@@ -12,6 +12,7 @@ import {
   Query,
   UseGuards,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
@@ -23,6 +24,7 @@ import { UpdateWorkflowDto } from "./dto/update-workflow.dto";
 import { UpdateWorkflowNodeDto } from "./dto/update-workflow-node.dto";
 import { WorkflowService } from "./workflow.service";
 
+@ApiTags("workflows")
 @Controller("workflows")
 @UseGuards(JwtAuthGuard)
 export class WorkflowController {

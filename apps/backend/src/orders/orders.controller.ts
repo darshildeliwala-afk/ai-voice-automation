@@ -11,6 +11,7 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { CreateOrderDto } from "../order/dto/create-order.dto";
 import { UpdateOrderDto } from "../order/dto/update-order.dto";
@@ -18,6 +19,7 @@ import { OrderService } from "../order/order.service";
 import { ListOrdersQueryDto } from "./dto/list-orders-query.dto";
 import { SearchOrdersQueryDto } from "./dto/search-orders-query.dto";
 
+@ApiTags("orders")
 @Controller("orders")
 export class OrdersController {
   constructor(private readonly orderService: OrderService) {}

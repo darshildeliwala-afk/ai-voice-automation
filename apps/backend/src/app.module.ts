@@ -11,6 +11,7 @@ import { PrismaModule } from "./common/prisma/prisma.module";
 import { ConversationEngineModule } from "./conversation-engine/conversation-engine.module";
 import { CrmNoteModule } from "./crm-note/crm-note.module";
 import { CustomerModule } from "./customer/customer.module";
+import { DashboardModule } from "./dashboard/dashboard.module";
 import { HealthModule } from "./health/health.module";
 import { ImportsModule } from "./imports/imports.module";
 import { KnowledgeBaseModule } from "./knowledge-base/knowledge-base.module";
@@ -48,6 +49,7 @@ import { WorkspaceSettingsModule } from "./workspace-settings/workspace-settings
     AppointmentModule,
     CrmNoteModule,
     LeadQualificationModule,
+    DashboardModule,
   ],
 })
 export class AppModule {}

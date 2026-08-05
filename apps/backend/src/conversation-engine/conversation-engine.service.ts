@@ -47,6 +47,8 @@ export interface ProcessMessageResult {
   toolCallsExecuted: string[];
   /** Language this turn was framed in -- LanguageDetectionService's match on input.message, or the Conversation's previously-detected language, or the workspace/agent persona's default (Sprint 18). */
   resolvedLanguage: string;
+  /** Key of the last workflow node that ran this turn (Sprint 20 Live Call API) -- lets MediaSession persist "what step of the conversation is this call currently at" for the admin Live Call view. */
+  lastNodeKey?: string;
 }
 
 /**
@@ -208,6 +210,7 @@ export class ConversationEngineService extends BaseService {
       latencyMs: Date.now() - startedAt,
       toolCallsExecuted: result.toolCallsExecuted,
       resolvedLanguage,
+      lastNodeKey: result.lastNodeKey,
     };
   }
 

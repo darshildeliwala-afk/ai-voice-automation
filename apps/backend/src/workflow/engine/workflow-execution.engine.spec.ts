@@ -57,6 +57,7 @@ describe("WorkflowExecutionEngine", () => {
       completionTokens: 5,
       totalTokens: 15,
       stepsExecuted: 2,
+      lastNodeKey: "end",
     });
   });
 
@@ -77,6 +78,7 @@ describe("WorkflowExecutionEngine", () => {
     expect(promptExecute).toHaveBeenCalledTimes(1);
     expect(result.stepsExecuted).toBe(1);
     expect(result.content).toBe("Done");
+    expect(result.lastNodeKey).toBe("start");
   });
 
   it("merges stateUpdates into the shared context.state between nodes", async () => {
@@ -169,6 +171,9 @@ describe("WorkflowExecutionEngine", () => {
     const result = await engine.execute(graph, context());
 
     expect(result.stepsExecuted).toBe(25);
+    // 25 steps alternating loop-a (odd steps) / loop-b (even steps) --
+    // step 25 is odd, so loop-a ran last.
+    expect(result.lastNodeKey).toBe("loop-a");
   });
 
   it("throws when `next` references a node not present in the graph", async () => {

@@ -15,6 +15,7 @@ jest.mock("plivo", () => ({
   Response: jest.fn().mockImplementation(() => ({
     addSpeak: jest.fn(),
     addRecord: jest.fn(),
+    addStream: jest.fn(),
     toXML: () => "<Response><Speak>stub</Speak></Response>",
   })),
 }));

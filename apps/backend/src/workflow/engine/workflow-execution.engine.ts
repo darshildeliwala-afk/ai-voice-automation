@@ -17,6 +17,8 @@ export interface WorkflowExecutionResult {
   totalTokens: number;
   estimatedCost: number;
   stepsExecuted: number;
+  /** Key of the last node that actually ran (Sprint 20 Live Call API). Tracked separately from the `currentKey` loop variable -- `currentKey` gets reassigned to `result.next` (the node that *would* run next) before every exit path except the `terminal: true` break, so deriving this from `currentKey` after the loop is wrong for the natural/step-limit exits. Undefined only if the graph had no entry node at all. */
+  lastNodeKey?: string;
 }
 
 /**
@@ -40,6 +42,7 @@ export class WorkflowExecutionEngine {
     const nodesByKey = new Map(graph.nodes.map((node) => [node.key, node]));
 
     let currentKey: string | undefined = graph.entryNodeKey;
+    let lastExecutedKey: string | undefined;
     let steps = 0;
     let content = "";
     let model = "";
@@ -53,6 +56,7 @@ export class WorkflowExecutionEngine {
 
     while (currentKey && steps < MAX_WORKFLOW_STEPS) {
       steps++;
+      lastExecutedKey = currentKey;
 
       const node = nodesByKey.get(currentKey);
       if (!node) {
@@ -103,6 +107,7 @@ export class WorkflowExecutionEngine {
       model,
       ...aggregate,
       stepsExecuted: steps,
+      lastNodeKey: lastExecutedKey,
     };
   }
 }

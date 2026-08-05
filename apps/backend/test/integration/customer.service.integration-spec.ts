@@ -2,13 +2,17 @@ import { randomUUID } from "node:crypto";
 
 import { ConflictException } from "@nestjs/common";
 
+import { CallQueueService } from "../../src/call-queue/call-queue.service";
 import { CustomerService } from "../../src/customer/customer.service";
 import { PrismaService } from "../../src/common/prisma/prisma.service";
+import { OrderService } from "../../src/order/order.service";
 import { WorkspaceService } from "../../src/workspace/workspace.service";
 
 describe("CustomerService (integration, real Postgres)", () => {
   let prisma: PrismaService;
   let service: CustomerService;
+  let orderService: OrderService;
+  let callQueueService: CallQueueService;
   let workspaceId: string;
   let otherWorkspaceId: string;
 
@@ -18,6 +22,8 @@ describe("CustomerService (integration, real Postgres)", () => {
 
     const workspaceService = new WorkspaceService(prisma);
     service = new CustomerService(prisma, workspaceService);
+    orderService = new OrderService(prisma, service);
+    callQueueService = new CallQueueService(prisma);
 
     workspaceId = randomUUID();
     otherWorkspaceId = randomUUID();
@@ -32,6 +38,15 @@ describe("CustomerService (integration, real Postgres)", () => {
   });
 
   afterAll(async () => {
+    await prisma.callQueue.deleteMany({
+      where: { order: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } },
+    });
+    await prisma.orderItem.deleteMany({
+      where: { order: { workspaceId: { in: [workspaceId, otherWorkspaceId] } } },
+    });
+    await prisma.order.deleteMany({
+      where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } },
+    });
     await prisma.customer.deleteMany({
       where: { workspaceId: { in: [workspaceId, otherWorkspaceId] } },
     });
@@ -143,5 +158,46 @@ describe("CustomerService (integration, real Postgres)", () => {
     });
 
     expect(updated.name).toBe("Self Update Renamed");
+  });
+
+  describe("getCustomerProfile (Sprint 20)", () => {
+    it("joins callbacks through the customer's own orders and never leaks another customer's callback", async () => {
+      const customerA = await service.createCustomer(workspaceId, {
+        name: "Profile Customer A",
+        phone: "+14155570008",
+      });
+      const customerB = await service.createCustomer(workspaceId, {
+        name: "Profile Customer B",
+        phone: "+14155570009",
+      });
+
+      const orderA = await orderService.createOrder({
+        workspaceId,
+        customerId: customerA.id,
+        marketplace: "MANUAL" as never,
+        paymentType: "COD" as never,
+        totalAmount: 100,
+      });
+      const orderB = await orderService.createOrder({
+        workspaceId,
+        customerId: customerB.id,
+        marketplace: "MANUAL" as never,
+        paymentType: "COD" as never,
+        totalAmount: 200,
+      });
+
+      await callQueueService.enqueue(orderA.id, new Date(), "Customer A requested a callback");
+      await callQueueService.enqueue(orderB.id, new Date(), "Customer B requested a callback");
+      // Ordinary dial-queue row (no reason) -- must never surface as a "callback".
+      await callQueueService.enqueue(orderA.id, new Date());
+
+      const profile = await service.getCustomerProfile(workspaceId, customerA.id);
+
+      expect(profile.customer.id).toBe(customerA.id);
+      expect(profile.orders.map((o) => o.id)).toEqual([orderA.id]);
+      expect(profile.callbacks).toHaveLength(1);
+      expect(profile.callbacks[0].reason).toBe("Customer A requested a callback");
+      expect(profile.callbacks.every((c) => c.orderId === orderA.id)).toBe(true);
+    });
   });
 });

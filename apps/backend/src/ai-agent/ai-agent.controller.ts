@@ -12,6 +12,7 @@ import {
   Put,
   Query,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { UpdateVoicePersonaConfigDto } from "../workspace-settings/dto/update-voice-persona-config.dto";
 import { VoicePersonaConfigService } from "../workspace-settings/voice-persona-config.service";
@@ -20,6 +21,7 @@ import { CreateAiAgentDto } from "./dto/create-ai-agent.dto";
 import { ListAiAgentsQueryDto } from "./dto/list-ai-agents-query.dto";
 import { UpdateAiAgentDto } from "./dto/update-ai-agent.dto";
 
+@ApiTags("ai-agents")
 @Controller("ai-agents")
 export class AiAgentController {
   constructor(

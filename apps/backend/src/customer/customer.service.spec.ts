@@ -12,7 +12,12 @@ function setup() {
     count: jest.fn(),
     update: jest.fn(),
   };
-  const prisma = { customer };
+  const order = { findMany: jest.fn().mockResolvedValue([]) };
+  const crmNote = { findMany: jest.fn().mockResolvedValue([]) };
+  const appointment = { findMany: jest.fn().mockResolvedValue([]) };
+  const callQueue = { findMany: jest.fn().mockResolvedValue([]) };
+  const conversation = { findMany: jest.fn().mockResolvedValue([]) };
+  const prisma = { customer, order, crmNote, appointment, callQueue, conversation };
   const workspaceService = {
     getWorkspaceById: jest.fn().mockResolvedValue({ id: WORKSPACE_ID }),
   };
@@ -22,7 +27,17 @@ function setup() {
     workspaceService as never,
   );
 
-  return { service, prisma, customer, workspaceService };
+  return {
+    service,
+    prisma,
+    customer,
+    order,
+    crmNote,
+    appointment,
+    callQueue,
+    conversation,
+    workspaceService,
+  };
 }
 
 describe("CustomerService", () => {
@@ -113,6 +128,77 @@ describe("CustomerService", () => {
 
       await expect(
         service.getCustomerById(WORKSPACE_ID, "deleted-cust"),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("getCustomerProfile", () => {
+    it("aggregates orders, notes, appointments, callbacks, and conversations for the customer", async () => {
+      const { service, customer, order, crmNote, appointment, callQueue, conversation } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-1", workspaceId: WORKSPACE_ID });
+      order.findMany.mockResolvedValue([{ id: "order-1" }, { id: "order-2" }]);
+      crmNote.findMany.mockResolvedValue([{ id: "note-1" }]);
+      appointment.findMany.mockResolvedValue([{ id: "appt-1" }]);
+      callQueue.findMany.mockResolvedValue([{ id: "cq-1", orderId: "order-1", reason: "wants a discount" }]);
+      conversation.findMany.mockResolvedValue([{ id: "conv-1", summary: null }]);
+
+      const result = await service.getCustomerProfile(WORKSPACE_ID, "cust-1");
+
+      expect(result.orders).toHaveLength(2);
+      expect(result.crmNotes).toEqual([{ id: "note-1" }]);
+      expect(result.appointments).toEqual([{ id: "appt-1" }]);
+      expect(result.callbacks).toEqual([
+        { id: "cq-1", orderId: "order-1", reason: "wants a discount" },
+      ]);
+      expect(result.conversations).toEqual([{ id: "conv-1", summary: null }]);
+    });
+
+    it("joins callbacks (CallQueue) through the customer's own orderIds, never a customerId column that doesn't exist on CallQueue", async () => {
+      const { service, customer, order, callQueue } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-1", workspaceId: WORKSPACE_ID });
+      order.findMany.mockResolvedValue([{ id: "order-1" }, { id: "order-2" }]);
+
+      await service.getCustomerProfile(WORKSPACE_ID, "cust-1");
+
+      expect(callQueue.findMany).toHaveBeenCalledWith({
+        where: { orderId: { in: ["order-1", "order-2"] }, reason: { not: null } },
+      });
+    });
+
+    it("never leaks a callback that belongs to a different customer's order", async () => {
+      // Customer A has order-1; Customer B (a different customer) has
+      // order-2 with its own callback. Fetching A's profile must only
+      // ever query CallQueue scoped to A's own orderIds.
+      const { service, customer, order, callQueue } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-A", workspaceId: WORKSPACE_ID });
+      order.findMany.mockResolvedValue([{ id: "order-1" }]); // only A's order
+
+      await service.getCustomerProfile(WORKSPACE_ID, "cust-A");
+
+      expect(callQueue.findMany).toHaveBeenCalledWith({
+        where: { orderId: { in: ["order-1"] }, reason: { not: null } },
+      });
+      // order-2 (belonging to customer B) is never part of the `in` filter.
+    });
+
+    it("scopes callbacks to CallQueue rows with a non-null reason -- excludes ordinary dial-queue rows", async () => {
+      const { service, customer, order, callQueue } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-1", workspaceId: WORKSPACE_ID });
+      order.findMany.mockResolvedValue([{ id: "order-1" }]);
+
+      await service.getCustomerProfile(WORKSPACE_ID, "cust-1");
+
+      expect(callQueue.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ reason: { not: null } }) }),
+      );
+    });
+
+    it("throws NotFoundException when the customer does not exist in the workspace", async () => {
+      const { service, customer } = setup();
+      customer.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getCustomerProfile(WORKSPACE_ID, "missing"),
       ).rejects.toThrow();
     });
   });

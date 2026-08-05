@@ -8,6 +8,7 @@ import type { TTSProviderFactory } from "../ai/providers/tts-provider.factory";
 import type { CallQueueService } from "../call-queue/call-queue.service";
 import type { PrismaService } from "../common/prisma/prisma.service";
 import type { ConversationEngineService } from "../conversation-engine/conversation-engine.service";
+import { LiveCallAiStatus, LiveCallSpeakingParty } from "../generated/prisma/client";
 import type {
   EffectiveVoicePersona,
   VoicePersonaConfigService,
@@ -112,6 +113,13 @@ export class MediaSession {
     this.silenceDetector?.stop();
     this.currentTurnAbort?.abort();
     this.currentTurnAbort = null;
+    // deleteMany, not delete -- the row may not exist if onStart() never
+    // got far enough to seed it, which would make delete() throw P2025.
+    // A call no longer live shouldn't appear in "list active calls"
+    // (Sprint 20 admin Live Call API).
+    void this.deps.prisma.liveCallState
+      .deleteMany({ where: { callId: this.callId } })
+      .catch((error) => this.logLiveStateWriteFailure(error));
   }
 
   handleError(error: Error): void {
@@ -221,6 +229,10 @@ export class MediaSession {
         return;
       }
       this.conversationId = conversation.id;
+      this.updateLiveCallState({
+        speakingParty: LiveCallSpeakingParty.SILENCE,
+        aiStatus: LiveCallAiStatus.LISTENING,
+      });
 
       const greeting = await this.deps.prisma.conversationMessage.findFirst({
         where: { conversationId: conversation.id, role: "ASSISTANT" },
@@ -267,6 +279,11 @@ export class MediaSession {
     // field unconditionally would wipe out the newer turn's controller.
     const abortController = new AbortController();
     this.currentTurnAbort = abortController;
+    this.updateLiveCallState({
+      aiStatus: LiveCallAiStatus.THINKING,
+      speakingParty: LiveCallSpeakingParty.SILENCE,
+      lastTranscriptSnippet: text,
+    });
 
     try {
       const result = await this.deps.conversationEngine.processMessage({
@@ -279,6 +296,9 @@ export class MediaSession {
         message: text,
         abortSignal: abortController.signal,
       });
+      if (result.lastNodeKey) {
+        this.updateLiveCallState({ currentWorkflowNodeKey: result.lastNodeKey });
+      }
       // Only speak this result if it's still the current turn -- a newer
       // utterance may have superseded (and aborted) this one while
       // processMessage() was in flight; if the abort signal didn't stop
@@ -312,6 +332,12 @@ export class MediaSession {
     if (!this.ttsProvider || !this.persona || !text) {
       return;
     }
+
+    this.updateLiveCallState({
+      aiStatus: LiveCallAiStatus.SPEAKING,
+      speakingParty: LiveCallSpeakingParty.AI,
+      turnStartedAt: new Date(),
+    });
 
     const stream = this.ttsProvider.synthesizeStream(text, {
       sampleRate: AUDIO_SAMPLE_RATE,
@@ -348,11 +374,56 @@ export class MediaSession {
 
   /** The interruption seam (Sprint 18 amendment #4): stops AI audio, tells Plivo to clear its playback buffer, and cancels the in-flight LLM call. */
   private bargeIn(): void {
+    this.updateLiveCallState({
+      speakingParty: LiveCallSpeakingParty.CUSTOMER,
+      aiStatus: LiveCallAiStatus.LISTENING,
+    });
     this.currentTtsStream?.cancel();
     this.currentTtsStream = null;
     if (this.ws.readyState === WS_READY_STATE_OPEN) {
       this.ws.send(buildClearAudioMessage());
     }
     this.currentTurnAbort?.abort();
+  }
+
+  /**
+   * Sprint 20 admin Live Call API -- persists live in-call state
+   * (currently-speaking party, what the AI is doing, the current
+   * workflow node, a transcript snippet) so an admin dashboard can list
+   * active calls with real state instead of nothing. Always fire-and-
+   * forget: the audio hot path must never block on a DB write, and a
+   * failed live-state write is never allowed to break the call itself.
+   */
+  private updateLiveCallState(patch: {
+    speakingParty?: LiveCallSpeakingParty;
+    aiStatus?: LiveCallAiStatus;
+    currentWorkflowNodeKey?: string;
+    lastTranscriptSnippet?: string;
+    turnStartedAt?: Date;
+  }): void {
+    if (!this.workspaceId) {
+      return;
+    }
+
+    void this.deps.prisma.liveCallState
+      .upsert({
+        where: { callId: this.callId },
+        create: {
+          callId: this.callId,
+          workspaceId: this.workspaceId,
+          conversationId: this.conversationId,
+          ...patch,
+        },
+        update: { conversationId: this.conversationId, ...patch },
+      })
+      .catch((error) => this.logLiveStateWriteFailure(error));
+  }
+
+  private logLiveStateWriteFailure(error: unknown): void {
+    this.logger.warn(
+      `Failed to update live call state for call ${this.callId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 }

@@ -33,6 +33,8 @@ import { OrderService } from "../../src/order/order.service";
 // eslint-disable-next-line import/first
 import { AiProviderConfigService } from "../../src/workspace-settings/ai-provider-config.service";
 // eslint-disable-next-line import/first
+import { VoicePersonaConfigService } from "../../src/workspace-settings/voice-persona-config.service";
+// eslint-disable-next-line import/first
 import { WorkspaceSettingsService } from "../../src/workspace-settings/workspace-settings.service";
 // eslint-disable-next-line import/first
 import { WorkspaceService } from "../../src/workspace/workspace.service";
@@ -66,6 +68,7 @@ describe("AIService (integration, real Postgres)", () => {
       encryptionService,
     );
     const providerFactory = new AIProviderFactory(aiProviderConfigService);
+    const voicePersonaConfigService = new VoicePersonaConfigService(prisma, workspaceService);
     const promptBuilder = new PromptBuilderService(
       prisma,
       workspaceSettingsService,
@@ -73,6 +76,7 @@ describe("AIService (integration, real Postgres)", () => {
       knowledgeBaseService,
       customerService,
       orderService,
+      voicePersonaConfigService,
     );
 
     service = new AIService(

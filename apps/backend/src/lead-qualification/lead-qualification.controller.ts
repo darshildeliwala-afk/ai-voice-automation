@@ -10,11 +10,13 @@ import {
   Patch,
   Query,
 } from "@nestjs/common";
+import { ApiTags } from "@nestjs/swagger";
 
 import { ListLeadQualificationsQueryDto } from "./dto/list-lead-qualifications-query.dto";
 import { UpdateLeadQualificationDto } from "./dto/update-lead-qualification.dto";
 import { LeadQualificationService } from "./lead-qualification.service";
 
+@ApiTags("lead-qualifications")
 @Controller("lead-qualifications")
 export class LeadQualificationController {
   constructor(

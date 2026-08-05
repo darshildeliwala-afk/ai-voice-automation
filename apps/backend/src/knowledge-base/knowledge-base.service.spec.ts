@@ -3,7 +3,12 @@ import { KnowledgeBaseService } from "./knowledge-base.service";
 const WORKSPACE_ID = "workspace-1";
 
 function setup() {
-  const knowledgeBase = { findMany: jest.fn() };
+  const knowledgeBase = {
+    findMany: jest.fn(),
+    findFirst: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+  };
   const prisma = { knowledgeBase };
   const workspaceService = {
     getWorkspaceById: jest.fn().mockResolvedValue({ id: WORKSPACE_ID }),
@@ -15,6 +20,15 @@ function setup() {
   );
 
   return { service, prisma, knowledgeBase, workspaceService };
+}
+
+function makeUploadedFile(text: string) {
+  return {
+    buffer: Buffer.from(text, "utf-8"),
+    originalname: "policy.txt",
+    mimetype: "text/plain",
+    size: text.length,
+  };
 }
 
 describe("KnowledgeBaseService.searchWithRelevance", () => {
@@ -103,5 +117,81 @@ describe("KnowledgeBaseService.searchWithRelevance", () => {
     const result = await service.searchWithRelevance(WORKSPACE_ID, "return", 3);
 
     expect(result.sourceDocuments).toHaveLength(3);
+  });
+});
+
+describe("KnowledgeBaseService.uploadKnowledgeBaseFile", () => {
+  it("validates the workspace, decodes the file content, and creates an entry", async () => {
+    const { service, knowledgeBase, workspaceService } = setup();
+    knowledgeBase.create.mockResolvedValue({ id: "kb-1" });
+
+    await service.uploadKnowledgeBaseFile(
+      { workspaceId: WORKSPACE_ID, title: "Return Policy", description: "FAQ" },
+      makeUploadedFile("Items can be returned within 30 days."),
+    );
+
+    expect(workspaceService.getWorkspaceById).toHaveBeenCalledWith(WORKSPACE_ID);
+    expect(knowledgeBase.create).toHaveBeenCalledWith({
+      data: {
+        workspaceId: WORKSPACE_ID,
+        title: "Return Policy",
+        description: "FAQ",
+        content: "Items can be returned within 30 days.",
+      },
+    });
+  });
+
+  it("rejects a file with no text content", async () => {
+    const { service } = setup();
+
+    await expect(
+      service.uploadKnowledgeBaseFile(
+        { workspaceId: WORKSPACE_ID, title: "Empty" },
+        makeUploadedFile("   "),
+      ),
+    ).rejects.toThrow();
+  });
+});
+
+describe("KnowledgeBaseService.reindexKnowledgeBase", () => {
+  it("sets status READY when content is present", async () => {
+    const { service, knowledgeBase } = setup();
+    knowledgeBase.findFirst.mockResolvedValue({
+      id: "kb-1",
+      workspaceId: WORKSPACE_ID,
+      content: "Some real content",
+    });
+    knowledgeBase.update.mockResolvedValue({ id: "kb-1", status: "READY" });
+
+    await service.reindexKnowledgeBase("kb-1");
+
+    expect(knowledgeBase.update).toHaveBeenCalledWith({
+      where: { id: "kb-1" },
+      data: { status: "READY" },
+    });
+  });
+
+  it("sets status FAILED when content is empty or missing", async () => {
+    const { service, knowledgeBase } = setup();
+    knowledgeBase.findFirst.mockResolvedValue({
+      id: "kb-1",
+      workspaceId: WORKSPACE_ID,
+      content: "   ",
+    });
+    knowledgeBase.update.mockResolvedValue({ id: "kb-1", status: "FAILED" });
+
+    await service.reindexKnowledgeBase("kb-1");
+
+    expect(knowledgeBase.update).toHaveBeenCalledWith({
+      where: { id: "kb-1" },
+      data: { status: "FAILED" },
+    });
+  });
+
+  it("throws when the knowledge base doesn't exist", async () => {
+    const { service, knowledgeBase } = setup();
+    knowledgeBase.findFirst.mockResolvedValue(null);
+
+    await expect(service.reindexKnowledgeBase("missing")).rejects.toThrow();
   });
 });

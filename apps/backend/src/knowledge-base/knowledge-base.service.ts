@@ -7,10 +7,19 @@ import {
   type PaginationMeta,
 } from "../common/pagination/pagination.util";
 import { PrismaService } from "../common/prisma/prisma.service";
-import { Prisma, type KnowledgeBase } from "../generated/prisma/client";
+import {
+  KnowledgeBaseStatus,
+  Prisma,
+  type KnowledgeBase,
+} from "../generated/prisma/client";
 import { WorkspaceService } from "../workspace/workspace.service";
 import { CreateKnowledgeBaseDto } from "./dto/create-knowledge-base.dto";
 import { UpdateKnowledgeBaseDto } from "./dto/update-knowledge-base.dto";
+import { UploadKnowledgeBaseDto } from "./dto/upload-knowledge-base.dto";
+import {
+  extractTextContent,
+  type UploadedKnowledgeBaseFile,
+} from "./parsing/text-file-parser";
 
 export interface PaginatedKnowledgeBases {
   data: KnowledgeBase[];
@@ -165,6 +174,46 @@ export class KnowledgeBaseService extends BaseService {
       sourceDocuments: scored.map((s) => ({ id: s.entry.id, title: s.entry.title })),
       confidence: top.matchedTerms / terms.length,
     };
+  }
+
+  /** Upload endpoint (Sprint 20) -- decodes a freeform-text file and creates a KnowledgeBase entry from it, reusing imports.controller.ts's FileInterceptor mechanism but not its tabular CSV/XLSX parser. */
+  async uploadKnowledgeBaseFile(
+    dto: UploadKnowledgeBaseDto,
+    file: UploadedKnowledgeBaseFile,
+  ): Promise<KnowledgeBase> {
+    await this.workspaceService.getWorkspaceById(dto.workspaceId);
+
+    const content = extractTextContent(file);
+
+    return this.prisma.knowledgeBase.create({
+      data: {
+        workspaceId: dto.workspaceId,
+        title: dto.title,
+        description: dto.description,
+        content,
+      },
+    });
+  }
+
+  /**
+   * Reindex endpoint (Sprint 20) -- no embeddings/vector-search pipeline
+   * exists in this codebase yet (see searchWithRelevance's own doc comment),
+   * so this is honestly just a synchronous content-presence check today:
+   * READY when content exists, FAILED when it doesn't. This is the seam a
+   * future async indexing job would plug into.
+   */
+  async reindexKnowledgeBase(id: string): Promise<KnowledgeBase> {
+    const knowledgeBase = await this.getKnowledgeBaseById(id);
+
+    return this.prisma.knowledgeBase.update({
+      where: { id },
+      data: {
+        status:
+          knowledgeBase.content && knowledgeBase.content.trim().length > 0
+            ? KnowledgeBaseStatus.READY
+            : KnowledgeBaseStatus.FAILED,
+      },
+    });
   }
 
   async updateKnowledgeBase(
