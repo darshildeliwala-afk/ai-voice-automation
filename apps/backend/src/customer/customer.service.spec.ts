@@ -117,6 +117,64 @@ describe("CustomerService", () => {
     });
   });
 
+  describe("findByIdentifier", () => {
+    it("returns null when no identifier is given", async () => {
+      const { service } = setup();
+
+      const result = await service.findByIdentifier(WORKSPACE_ID, {});
+
+      expect(result).toBeNull();
+    });
+
+    it("prioritizes customerId over phone/email", async () => {
+      const { service, customer } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-1" });
+
+      await service.findByIdentifier(WORKSPACE_ID, {
+        customerId: "cust-1",
+        phone: "+14155551234",
+        email: "jane@example.com",
+      });
+
+      expect(customer.findFirst).toHaveBeenCalledWith({
+        where: { id: "cust-1", workspaceId: WORKSPACE_ID, deletedAt: null },
+      });
+    });
+
+    it("falls back to phone when no customerId is given", async () => {
+      const { service, customer } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-1" });
+
+      await service.findByIdentifier(WORKSPACE_ID, { phone: "+14155551234" });
+
+      expect(customer.findFirst).toHaveBeenCalledWith({
+        where: { phone: "+14155551234", workspaceId: WORKSPACE_ID, deletedAt: null },
+      });
+    });
+
+    it("falls back to email when only email is given", async () => {
+      const { service, customer } = setup();
+      customer.findFirst.mockResolvedValue({ id: "cust-1" });
+
+      await service.findByIdentifier(WORKSPACE_ID, { email: "jane@example.com" });
+
+      expect(customer.findFirst).toHaveBeenCalledWith({
+        where: { email: "jane@example.com", workspaceId: WORKSPACE_ID, deletedAt: null },
+      });
+    });
+
+    it("returns null (never throws) when nothing matches", async () => {
+      const { service, customer } = setup();
+      customer.findFirst.mockResolvedValue(null);
+
+      const result = await service.findByIdentifier(WORKSPACE_ID, {
+        phone: "+10000000000",
+      });
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe("listCustomers", () => {
     it("paginates and scopes to the workspace", async () => {
       const { service, customer } = setup();

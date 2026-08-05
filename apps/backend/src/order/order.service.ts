@@ -57,6 +57,18 @@ export class OrderService extends BaseService {
     );
   }
 
+  /** Workspace+customer scoped, newest first -- backs lookup_customer/lookup_order's "last order" (Sprint 19). Null when the customer has no orders. */
+  async getMostRecentOrderForCustomer(
+    workspaceId: string,
+    customerId: string,
+  ): Promise<OrderWithItems | null> {
+    return this.prisma.order.findFirst({
+      where: this.applySoftDelete({ workspaceId, customerId }),
+      orderBy: { createdAt: "desc" },
+      include: { items: true },
+    });
+  }
+
   async listOrders(
     workspaceId: string,
     pagination: PaginationDto,

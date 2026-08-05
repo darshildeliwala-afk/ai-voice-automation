@@ -29,6 +29,10 @@ export class CreateCallbackTool implements IAITool {
           description:
             "ISO-8601 date-time for the callback, e.g. '2026-08-04T15:00:00Z'. Must be in the future.",
         },
+        reason: {
+          type: "string",
+          description: "Why the customer wants a callback, e.g. 'wants a discount'.",
+        },
       },
       required: ["scheduledAt"],
     };
@@ -65,9 +69,12 @@ export class CreateCallbackTool implements IAITool {
       };
     }
 
+    const reason = typeof args.reason === "string" ? args.reason : undefined;
+
     const queueItem = await this.callQueueService.enqueue(
       context.orderId,
       scheduledAt,
+      reason,
     );
 
     return {
@@ -75,6 +82,7 @@ export class CreateCallbackTool implements IAITool {
         scheduled: true,
         queueId: queueItem.id,
         scheduledAt: queueItem.scheduledAt,
+        reason: queueItem.reason,
       }),
     };
   }

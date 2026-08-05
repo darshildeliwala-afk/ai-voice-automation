@@ -10,6 +10,13 @@ import type {
 
 const MAX_RESULTS = 5;
 
+/**
+ * Improved retrieval (Sprint 19): returns a single answer + source
+ * documents + confidence instead of a raw results list, via
+ * KnowledgeBaseService.searchWithRelevance() (title+description+content
+ * matching with relevance scoring -- see that method's doc comment for
+ * why this isn't full semantic/embeddings search).
+ */
 @Injectable()
 export class SearchKnowledgeBaseTool implements IAITool {
   constructor(private readonly knowledgeBaseService: KnowledgeBaseService) {}
@@ -19,7 +26,7 @@ export class SearchKnowledgeBaseTool implements IAITool {
   }
 
   description(): string {
-    return "Searches the workspace's knowledge base for articles relevant to a query.";
+    return "Searches the workspace's knowledge base and returns the best answer, its source documents, and a confidence score.";
   }
 
   parameters(): AIToolParameterSchema {
@@ -47,20 +54,12 @@ export class SearchKnowledgeBaseTool implements IAITool {
       };
     }
 
-    const { data } = await this.knowledgeBaseService.listKnowledgeBases(
+    const result = await this.knowledgeBaseService.searchWithRelevance(
       context.workspaceId,
-      { page: 1, limit: MAX_RESULTS },
       query,
+      MAX_RESULTS,
     );
 
-    return {
-      content: JSON.stringify({
-        results: data.map((entry) => ({
-          title: entry.title,
-          description: entry.description,
-          content: entry.content,
-        })),
-      }),
-    };
+    return { content: JSON.stringify(result) };
   }
 }

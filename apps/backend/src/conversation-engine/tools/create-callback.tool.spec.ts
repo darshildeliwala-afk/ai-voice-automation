@@ -27,8 +27,36 @@ describe("CreateCallbackTool", () => {
     expect(callQueueService.enqueue).toHaveBeenCalledWith(
       "order-1",
       new Date(scheduledAt),
+      undefined,
     );
     expect(JSON.parse(result.content).scheduled).toBe(true);
+  });
+
+  it("passes an optional reason through to CallQueueService.enqueue (Sprint 19)", async () => {
+    const callQueueService = {
+      enqueue: jest.fn().mockResolvedValue({
+        id: "queue-1",
+        scheduledAt: new Date("2026-08-04T15:00:00Z"),
+        reason: "wants a discount",
+      }),
+    };
+    const tool = new CreateCallbackTool(callQueueService as never);
+    const scheduledAt = futureIso(2);
+
+    const result = await tool.execute(
+      { scheduledAt, reason: "wants a discount" },
+      CONTEXT,
+    );
+
+    expect(callQueueService.enqueue).toHaveBeenCalledWith(
+      "order-1",
+      new Date(scheduledAt),
+      "wants a discount",
+    );
+    expect(JSON.parse(result.content)).toMatchObject({
+      scheduled: true,
+      reason: "wants a discount",
+    });
   });
 
   it("returns a graceful error when the conversation has no bound order", async () => {

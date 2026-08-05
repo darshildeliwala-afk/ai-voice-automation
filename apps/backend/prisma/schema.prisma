@@ -80,6 +80,7 @@ enum ConversationStatus {
   ACTIVE
   COMPLETED
   FAILED
+  WAITING_FOR_HUMAN
 }
 
 enum ConversationRole {
@@ -149,6 +150,25 @@ enum VoiceGender {
   NEUTRAL
 }
 
+enum Sentiment {
+  POSITIVE
+  NEUTRAL
+  NEGATIVE
+}
+
+enum LeadInterestLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
 model Workspace {
   id                     String                  @id @default(uuid()) @db.Uuid
   name                   String
@@ -175,6 +195,12 @@ model Workspace {
   sttProviderConfigs     SttProviderConfig[]
   ttsProviderConfigs     TtsProviderConfig[]
   voicePersonaConfig     VoicePersonaConfig?
+  conversationSummaries  ConversationSummary[]
+  humanTransferEvents    HumanTransferEvent[]
+  leadQualifications     LeadQualification[]
+  appointments           Appointment[]
+  crmNotes               CrmNote[]
+  tagStats               WorkspaceTagStat[]
 
   @@index([deletedAt])
 }
@@ -198,20 +224,25 @@ model User {
 }
 
 model Customer {
-  id            String         @id @default(uuid()) @db.Uuid
-  workspaceId   String         @db.Uuid
-  name          String
-  phone         String
-  email         String?
-  language      String?
-  metadata      Json?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  deletedAt     DateTime?
-  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  orders        Order[]
-  calls         Call[]
-  conversations Conversation[]
+  id                 String              @id @default(uuid()) @db.Uuid
+  workspaceId        String              @db.Uuid
+  name               String
+  phone              String
+  email              String?
+  language           String?
+  /// Normalized (title-cased, deduplicated) tags -- see CustomerTagService (Sprint 19). Free-form, not an enum, so new tags never need a migration.
+  tags               String[]            @default([])
+  metadata           Json?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  orders             Order[]
+  calls              Call[]
+  conversations      Conversation[]
+  leadQualifications LeadQualification[]
+  appointments       Appointment[]
+  crmNotes           CrmNote[]
 
   @@index([workspaceId])
   @@index([phone])
@@ -219,27 +250,31 @@ model Customer {
 }
 
 model Order {
-  id                 String         @id @default(uuid()) @db.Uuid
-  workspaceId        String         @db.Uuid
-  customerId         String         @db.Uuid
-  marketplace        Marketplace
-  marketplaceOrderId String?
-  paymentType        PaymentType
-  status             OrderStatus    @default(PENDING)
-  totalAmount        Decimal        @db.Decimal(12, 2)
-  currency           String         @default("INR") @db.VarChar(3)
-  shippingAddress    Json?
-  notes              String?
-  metadata           Json?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-  deletedAt          DateTime?
-  workspace          Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  customer           Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  items              OrderItem[]
-  callQueue          CallQueue[]
-  calls              Call[]
-  conversations      Conversation[]
+  id                  String         @id @default(uuid()) @db.Uuid
+  workspaceId         String         @db.Uuid
+  customerId          String         @db.Uuid
+  marketplace         Marketplace
+  marketplaceOrderId  String?
+  paymentType         PaymentType
+  status              OrderStatus    @default(PENDING)
+  totalAmount         Decimal        @db.Decimal(12, 2)
+  currency            String         @default("INR") @db.VarChar(3)
+  shippingAddress     Json?
+  notes               String?
+  /// Courier/tracking details (Sprint 19 lookup_order tool) -- "shipping status" deliberately reuses `status` above (already has SHIPPED/DELIVERED) rather than a duplicate field.
+  courier             String?
+  trackingId          String?
+  estimatedDeliveryAt DateTime?
+  metadata            Json?
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  deletedAt           DateTime?
+  workspace           Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer            Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items               OrderItem[]
+  callQueue           CallQueue[]
+  calls               Call[]
+  conversations       Conversation[]
 
   @@unique([workspaceId, marketplace, marketplaceOrderId])
   @@index([customerId])
@@ -298,6 +333,8 @@ model CallQueue {
   aiAgentId    String?     @db.Uuid
   status       QueueStatus @default(QUEUED)
   scheduledAt  DateTime?
+  /// Why this callback was scheduled (Sprint 19 create_callback tool), e.g. "wants a discount". Optional -- pre-existing enqueue() callers never set it.
+  reason       String?
   attemptCount Int         @default(0)
   lastError    String?
   startedAt    DateTime?
@@ -386,24 +423,31 @@ model Transcript {
 /// over the phone -- not required, since the AI provider layer is
 /// usable independent of an active voice call).
 model Conversation {
-  id           String                @id @default(uuid()) @db.Uuid
-  workspaceId  String                @db.Uuid
-  customerId   String                @db.Uuid
-  orderId      String?               @db.Uuid
-  aiAgentId    String?               @db.Uuid
-  callId       String?               @unique @db.Uuid
-  status       ConversationStatus    @default(ACTIVE)
+  id                  String                @id @default(uuid()) @db.Uuid
+  workspaceId         String                @db.Uuid
+  customerId          String                @db.Uuid
+  orderId             String?               @db.Uuid
+  aiAgentId           String?               @db.Uuid
+  callId              String?               @unique @db.Uuid
+  status              ConversationStatus    @default(ACTIVE)
   /// Resolved language code once detected/confirmed this call (e.g. "hi", "en", "gu"); null until a customer states an explicit preference (Sprint 18 LanguageDetectionService).
-  language     String?
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
-  workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  customer     Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  order        Order?                @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  aiAgent      AiAgent?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
-  call         Call?                 @relation(fields: [callId], references: [id], onDelete: SetNull)
-  messages     ConversationMessage[]
-  usageRecords AIUsage[]
+  language            String?
+  /// Denormalized single source of truth, set once at call-end by CallSummaryService (Sprint 19) -- avoids the LLM-generated summary and a separate heuristic pass ever disagreeing.
+  sentiment           Sentiment?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  workspace           Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer            Customer              @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  order               Order?                @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  aiAgent             AiAgent?              @relation(fields: [aiAgentId], references: [id], onDelete: SetNull)
+  call                Call?                 @relation(fields: [callId], references: [id], onDelete: SetNull)
+  messages            ConversationMessage[]
+  usageRecords        AIUsage[]
+  summary             ConversationSummary?
+  humanTransferEvents HumanTransferEvent[]
+  leadQualification   LeadQualification?
+  appointments        Appointment[]
+  crmNotes            CrmNote[]
 
   @@index([workspaceId])
   @@index([customerId])
@@ -774,4 +818,139 @@ model WorkflowNode {
 
   @@unique([workflowId, key])
   @@index([workflowId])
+}
+
+/// Structured summary auto-generated at the end of every call (Sprint 19
+/// business AI skills), 1:1 with Conversation. Sentiment is computed by
+/// the lightweight SentimentAnalysisService heuristic (not the LLM) so
+/// there is one canonical source of truth; every other field comes from
+/// a single structured-JSON LLM call over the conversation transcript.
+/// Generated by CallSummaryService, called from EndCallTool -- failure
+/// to generate never blocks call termination.
+model ConversationSummary {
+  id                     String       @id @default(uuid()) @db.Uuid
+  workspaceId            String       @db.Uuid
+  conversationId         String       @unique @db.Uuid
+  customerName           String?
+  reason                 String?
+  outcome                String?
+  sentiment              Sentiment?
+  followUpRecommendation String?
+  callbackRequired       Boolean      @default(false)
+  agentPerformance       String?
+  ordersDiscussed        String[]     @default([])
+  problems               String[]     @default([])
+  createdAt              DateTime     @default(now())
+  workspace              Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation           Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+/// Records a request to hand a conversation to a human agent (Sprint 19
+/// transfer_to_human tool). No telephony transfer capability exists yet
+/// -- this is purely a record + a Conversation.status flip to
+/// WAITING_FOR_HUMAN for a future admin/agent-facing flow to act on.
+model HumanTransferEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  workspaceId    String       @db.Uuid
+  conversationId String       @db.Uuid
+  reason         String
+  createdAt      DateTime     @default(now())
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([conversationId])
+}
+
+/// One row per conversation, upsert-merged as the qualify_lead tool
+/// learns more fields across multiple calls within that conversation
+/// (Prisma's update skips undefined keys, so a call that only knows
+/// `budget` never nulls out a `name` learned earlier).
+model LeadQualification {
+  id             String             @id @default(uuid()) @db.Uuid
+  workspaceId    String             @db.Uuid
+  customerId     String             @db.Uuid
+  conversationId String             @unique @db.Uuid
+  name           String?
+  company        String?
+  /// Free text -- spoken/typed budgets ("50k-1L") aren't reliably numeric.
+  budget         String?
+  requirement    String?
+  timeline       String?
+  city           String?
+  email          String?
+  interestLevel  LeadInterestLevel?
+  deletedAt      DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  workspace      Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer       Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  conversation   Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([customerId])
+}
+
+/// Generic booking record (Sprint 19 book_appointment tool). No external
+/// calendar integration yet -- pure DB record. `time` is a plain "HH:mm"
+/// string (display/comparison only, no time arithmetic needed) rather
+/// than a native DB time type, to avoid the epoch-anchoring friction
+/// Prisma's @db.Time <-> JS Date round-trip otherwise adds for no benefit.
+model Appointment {
+  id             String            @id @default(uuid()) @db.Uuid
+  workspaceId    String            @db.Uuid
+  customerId     String            @db.Uuid
+  conversationId String?           @db.Uuid
+  date           DateTime          @db.Date
+  time           String
+  timezone       String
+  notes          String?
+  status         AppointmentStatus @default(SCHEDULED)
+  deletedAt      DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  workspace      Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer       Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  conversation   Conversation?     @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([customerId])
+}
+
+/// Free-form note the AI (via create_crm_note) or an admin can attach to
+/// a customer, optionally scoped to the conversation it was written
+/// during. Surfaced back through the improved lookup_customer tool.
+model CrmNote {
+  id             String        @id @default(uuid()) @db.Uuid
+  workspaceId    String        @db.Uuid
+  customerId     String        @db.Uuid
+  conversationId String?       @db.Uuid
+  content        String
+  deletedAt      DateTime?
+  createdAt      DateTime      @default(now())
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customer       Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([customerId])
+}
+
+/// Per-workspace usage count for each normalized tag (Sprint 19
+/// CustomerTagService) -- reflects how many customers currently carry
+/// the tag (incremented on add, decremented floor-0 on remove, row never
+/// deleted), so an admin UI can suggest frequently used tags.
+model WorkspaceTagStat {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @db.Uuid
+  tag         String
+  usageCount  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, tag])
+  @@index([workspaceId])
 }

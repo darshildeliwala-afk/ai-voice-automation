@@ -49,6 +49,35 @@ export class CustomerService extends BaseService {
     );
   }
 
+  /**
+   * Precise (non-fuzzy) exact match, workspace-scoped, priority
+   * customerId > phone > email -- unlike listCustomers()'s fuzzy `contains`
+   * search, this is for tools (Sprint 19 lookup_customer/lookup_order)
+   * that need one definite match, not a results list. Returns null
+   * (never throws) when no identifier is given or nothing matches.
+   */
+  async findByIdentifier(
+    workspaceId: string,
+    identifier: { customerId?: string; phone?: string; email?: string },
+  ): Promise<Customer | null> {
+    if (identifier.customerId) {
+      return this.prisma.customer.findFirst({
+        where: this.applySoftDelete({ id: identifier.customerId, workspaceId }),
+      });
+    }
+    if (identifier.phone) {
+      return this.prisma.customer.findFirst({
+        where: this.applySoftDelete({ phone: identifier.phone, workspaceId }),
+      });
+    }
+    if (identifier.email) {
+      return this.prisma.customer.findFirst({
+        where: this.applySoftDelete({ email: identifier.email, workspaceId }),
+      });
+    }
+    return null;
+  }
+
   async listCustomers(
     workspaceId: string,
     pagination: PaginationDto,

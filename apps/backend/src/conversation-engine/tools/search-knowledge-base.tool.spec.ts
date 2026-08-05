@@ -7,60 +7,56 @@ const CONTEXT = {
 };
 
 describe("SearchKnowledgeBaseTool", () => {
-  it("searches the workspace's knowledge base and returns matching entries", async () => {
+  it("searches via KnowledgeBaseService.searchWithRelevance and returns answer/sourceDocuments/confidence (Sprint 19)", async () => {
     const knowledgeBaseService = {
-      listKnowledgeBases: jest.fn().mockResolvedValue({
-        data: [
-          {
-            title: "Return Policy",
-            description: "How returns work",
-            content: "Returns accepted within 30 days.",
-          },
-        ],
-        meta: { page: 1, limit: 5, total: 1, totalPages: 1 },
+      searchWithRelevance: jest.fn().mockResolvedValue({
+        answer: "Returns are accepted within 30 days.",
+        sourceDocuments: [{ id: "kb-1", title: "Return Policy" }],
+        confidence: 0.8,
       }),
     };
     const tool = new SearchKnowledgeBaseTool(knowledgeBaseService as never);
 
     const result = await tool.execute({ query: "returns" }, CONTEXT);
 
-    expect(knowledgeBaseService.listKnowledgeBases).toHaveBeenCalledWith(
+    expect(knowledgeBaseService.searchWithRelevance).toHaveBeenCalledWith(
       "workspace-1",
-      { page: 1, limit: 5 },
       "returns",
+      5,
     );
     expect(JSON.parse(result.content)).toEqual({
-      results: [
-        {
-          title: "Return Policy",
-          description: "How returns work",
-          content: "Returns accepted within 30 days.",
-        },
-      ],
+      answer: "Returns are accepted within 30 days.",
+      sourceDocuments: [{ id: "kb-1", title: "Return Policy" }],
+      confidence: 0.8,
     });
   });
 
   it("returns a graceful error when query is missing or blank", async () => {
-    const knowledgeBaseService = { listKnowledgeBases: jest.fn() };
+    const knowledgeBaseService = { searchWithRelevance: jest.fn() };
     const tool = new SearchKnowledgeBaseTool(knowledgeBaseService as never);
 
     const result = await tool.execute({ query: "   " }, CONTEXT);
 
     expect(JSON.parse(result.content).error).toBeDefined();
-    expect(knowledgeBaseService.listKnowledgeBases).not.toHaveBeenCalled();
+    expect(knowledgeBaseService.searchWithRelevance).not.toHaveBeenCalled();
   });
 
-  it("returns an empty results array when nothing matches", async () => {
+  it("passes through a zero-confidence empty answer when nothing matches", async () => {
     const knowledgeBaseService = {
-      listKnowledgeBases: jest.fn().mockResolvedValue({
-        data: [],
-        meta: { page: 1, limit: 5, total: 0, totalPages: 0 },
+      searchWithRelevance: jest.fn().mockResolvedValue({
+        answer: "",
+        sourceDocuments: [],
+        confidence: 0,
       }),
     };
     const tool = new SearchKnowledgeBaseTool(knowledgeBaseService as never);
 
     const result = await tool.execute({ query: "nonexistent topic" }, CONTEXT);
 
-    expect(JSON.parse(result.content)).toEqual({ results: [] });
+    expect(JSON.parse(result.content)).toEqual({
+      answer: "",
+      sourceDocuments: [],
+      confidence: 0,
+    });
   });
 });

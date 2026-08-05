@@ -9,13 +9,18 @@ const MAX_ATTEMPTS = 3;
 export class CallQueueService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async enqueue(orderId: string, scheduledAt?: Date): Promise<CallQueue> {
+  async enqueue(
+    orderId: string,
+    scheduledAt?: Date,
+    reason?: string,
+  ): Promise<CallQueue> {
     return this.prisma.callQueue.create({
       data: {
         orderId,
         status: QueueStatus.QUEUED,
         scheduledAt: scheduledAt ?? new Date(),
         attemptCount: 0,
+        reason,
       },
     });
   }

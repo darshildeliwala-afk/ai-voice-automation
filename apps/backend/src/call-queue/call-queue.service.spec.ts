@@ -38,6 +38,19 @@ describe("CallQueueService", () => {
     );
   });
 
+  it("enqueue() persists an optional reason (Sprint 19 create_callback tool)", async () => {
+    const { service, callQueue } = setup();
+    callQueue.create.mockResolvedValue({ id: "q1", status: QueueStatus.QUEUED });
+
+    await service.enqueue("order-1", new Date("2026-08-10T00:00:00Z"), "wants a discount");
+
+    expect(callQueue.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ reason: "wants a discount" }),
+      }),
+    );
+  });
+
   describe("findById", () => {
     it("returns the row when found", async () => {
       const { service, callQueue } = setup();

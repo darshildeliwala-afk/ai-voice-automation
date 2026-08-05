@@ -16,6 +16,7 @@ import {
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
 import type { AuthenticatedUser } from "../auth/jwt.strategy";
+import { CustomerTagService } from "./customer-tag.service";
 import { CustomerService } from "./customer.service";
 import { CreateCustomerDto } from "./dto/create-customer.dto";
 import { ListCustomersQueryDto } from "./dto/list-customers-query.dto";
@@ -24,7 +25,10 @@ import { UpdateCustomerDto } from "./dto/update-customer.dto";
 @Controller("customers")
 @UseGuards(JwtAuthGuard)
 export class CustomerController {
-  constructor(private readonly customerService: CustomerService) {}
+  constructor(
+    private readonly customerService: CustomerService,
+    private readonly customerTagService: CustomerTagService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -47,6 +51,12 @@ export class CustomerController {
       pagination,
       search,
     );
+  }
+
+  /** Sorted by usage desc -- backs an admin UI's "suggest frequently used tags" (Sprint 19). Declared before :id so it isn't captured by that route. */
+  @Get("tags")
+  listTopTags(@CurrentUser() user: AuthenticatedUser) {
+    return this.customerTagService.getTopTags(user.workspaceId);
   }
 
   @Get(":id")

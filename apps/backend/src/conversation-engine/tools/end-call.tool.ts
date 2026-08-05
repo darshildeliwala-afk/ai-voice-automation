@@ -1,7 +1,8 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 
 import { PrismaService } from "../../common/prisma/prisma.service";
 import { ConversationStatus } from "../../generated/prisma/client";
+import { CallSummaryService } from "../call-summary.service";
 import type {
   AIToolExecutionContext,
   AIToolExecutionResult,
@@ -10,14 +11,21 @@ import type {
 } from "./ai-tool.interface";
 
 /**
- * Marks the conversation as concluded. No live call to hang up exists yet
- * (voice streaming is Sprint 16) -- this records the AI's decision so a
- * future voice-streaming layer knows to end the call, and stops this
- * turn's tool-calling loop (terminal: true).
+ * Marks the conversation as concluded (real live-call hangup is handled
+ * by the Sprint 18 MediaSession orchestrator reacting to this status
+ * change) and triggers automatic call-summary generation (Sprint 19).
+ * Summary generation is awaited but never fatal -- a failure there must
+ * never block call termination, so it's wrapped in try/catch and only
+ * logged (same pattern as TelephonyWebhookService.triggerConversationEngine).
  */
 @Injectable()
 export class EndCallTool implements IAITool {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EndCallTool.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly callSummaryService: CallSummaryService,
+  ) {}
 
   name(): string {
     return "end_call";
@@ -51,6 +59,18 @@ export class EndCallTool implements IAITool {
       where: { id: context.conversationId },
       data: { status: ConversationStatus.COMPLETED },
     });
+
+    try {
+      await this.callSummaryService.generateAndPersist(
+        context.conversationId,
+        context.workspaceId,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Call summary generation failed for conversation ${context.conversationId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
 
     return {
       content: JSON.stringify({ ended: true, reason }),
