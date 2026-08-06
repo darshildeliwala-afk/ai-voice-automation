@@ -357,7 +357,7 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
           { key: "wrap_up", type: WorkflowNodeType.PROMPT, config: { allowTools: false } },
         ],
       });
-      const published = await workflowService.publish(workflow.id);
+      const published = await workflowService.publish(workspaceId, workflow.id);
       expect(published.status).toBe("PUBLISHED");
       expect(published.isActive).toBe(true);
 
@@ -443,7 +443,7 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
           { key: "wrap_up", type: WorkflowNodeType.END, config: { reason: "Order already shipped" } },
         ],
       });
-      await workflowService.publish(workflow.id);
+      await workflowService.publish(workspaceId, workflow.id);
 
       mockCreate.mockResolvedValueOnce(
         openAiResponse({ content: "Let me check that for you." }),
@@ -476,11 +476,11 @@ describe("ConversationEngineService (integration, real Postgres)", () => {
         entryNodeKey: "end",
         nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
       });
-      await workflowService.publish(v1.id);
+      await workflowService.publish(workspaceId, v1.id);
 
-      const v2 = await workflowService.createNewVersion(v1.id);
+      const v2 = await workflowService.createNewVersion(workspaceId, v1.id);
       expect(v2.version).toBe(2);
-      await workflowService.publish(v2.id);
+      await workflowService.publish(workspaceId, v2.id);
 
       const versions = await workflowService.listVersions(workspaceId, slug);
       const v1Reloaded = versions.find((v) => v.id === v1.id);

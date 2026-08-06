@@ -9,6 +9,7 @@ import type { CallQueueService } from "../call-queue/call-queue.service";
 import type { PrismaService } from "../common/prisma/prisma.service";
 import type { ConversationEngineService } from "../conversation-engine/conversation-engine.service";
 import { LiveCallAiStatus, LiveCallSpeakingParty } from "../generated/prisma/client";
+import type { TelephonyProviderFactory } from "../telephony/providers/telephony-provider.factory";
 import type {
   EffectiveVoicePersona,
   VoicePersonaConfigService,
@@ -31,11 +32,17 @@ export interface MediaSessionDeps {
   callQueueService: CallQueueService;
   voicePersonaConfigService: VoicePersonaConfigService;
   mediaSessionConfig: MediaSessionConfig;
+  telephonyProviderFactory: TelephonyProviderFactory;
 }
 
 const AUDIO_CONTENT_TYPE = "audio/x-mulaw";
 const AUDIO_SAMPLE_RATE = 8000;
 const AUDIO_ENCODING = "mulaw";
+/** Spoken (best-effort) before hanging up on an unrecoverable session error (Sprint 21) -- better than leaving the customer connected to silence indefinitely. */
+const FAILURE_APOLOGY_MESSAGE =
+  "I'm sorry, we're having a technical issue on our end. Please try calling again shortly.";
+/** Spoken when a single turn is aborted by MediaSessionConfig.aiResponseTimeoutMs (Sprint 21) -- a stuck LLM/provider call must never leave the customer in total silence. */
+const TURN_TIMEOUT_MESSAGE = "Sorry, that's taking longer than expected. Let me try again.";
 /** WebSocket.OPEN's value per the ws/browser spec (0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED) -- hardcoded since `ws` is only imported as a type here. */
 const WS_READY_STATE_OPEN = 1;
 
@@ -61,6 +68,8 @@ export class MediaSession {
   private workspaceId: string | null = null;
   private customerId: string | null = null;
   private orderId: string | undefined;
+  /** Cached for a best-effort REST hangup on an unrecoverable failure (Sprint 21) -- set as early as possible in onStart() so it's available even if a later setup step throws. */
+  private providerCallId: string | null = null;
   private aiAgentId: string | undefined;
   private conversationId: string | null = null;
   private persona: EffectiveVoicePersona | null = null;
@@ -71,6 +80,8 @@ export class MediaSession {
   private currentTurnAbort: AbortController | null = null;
   private silenceDetector: SilenceDetector | null = null;
   private pendingTranscript = "";
+  /** Sprint 21 latency logging -- timestamp of the current utterance's first STT event, null between utterances. */
+  private utteranceSttStartedAt: number | null = null;
   /** Set the moment handleClose() runs; onStart() checks this after its network-bound awaits so a call that hangs up mid-startup can't leak a live STT connection nobody will ever close. */
   private closed = false;
 
@@ -122,12 +133,46 @@ export class MediaSession {
       .catch((error) => this.logLiveStateWriteFailure(error));
   }
 
+  /**
+   * Sprint 21 production-validation fix: previously this only logged and
+   * tore down local state, leaving the customer connected with silence
+   * forever on any unrecoverable failure (missing AI/STT/TTS config, an
+   * unimplemented provider, a mid-call STT disconnect). Now it also
+   * best-effort speaks a short apology (if TTS is available) and asks the
+   * telephony provider to hang up the underlying call. Neither is
+   * guaranteed to complete before the other (no server-side TTS-completion
+   * signal from the provider), but doing both is strictly better than the
+   * previous silent-forever behavior.
+   */
   handleError(error: Error): void {
     this.logger.error(
       `Media session error for call ${this.callId}`,
       error.stack,
     );
     this.handleClose();
+
+    if (this.ttsProvider && this.persona && this.ws.readyState === WS_READY_STATE_OPEN) {
+      this.speak(FAILURE_APOLOGY_MESSAGE);
+    }
+    void this.hangupProviderCall();
+  }
+
+  private async hangupProviderCall(): Promise<void> {
+    if (!this.workspaceId || !this.providerCallId) {
+      return;
+    }
+    try {
+      const provider = await this.deps.telephonyProviderFactory.createForWorkspace(
+        this.workspaceId,
+      );
+      await provider.hangup(this.providerCallId);
+    } catch (hangupError) {
+      this.logger.warn(
+        `Failed to hang up call ${this.callId} after an unrecoverable error: ${
+          hangupError instanceof Error ? hangupError.message : String(hangupError)
+        }`,
+      );
+    }
   }
 
   private async onStart(): Promise<void> {
@@ -137,11 +182,13 @@ export class MediaSession {
       });
       if (!call) {
         this.logger.error(`Media stream start event for unknown call ${this.callId}`);
+        this.ws.close();
         return;
       }
       this.workspaceId = call.workspaceId;
       this.customerId = call.customerId;
       this.orderId = call.orderId;
+      this.providerCallId = call.providerCallId;
 
       const queueItem = await this.deps.callQueueService.findById(call.callQueueId);
       this.aiAgentId = queueItem.aiAgentId ?? undefined;
@@ -182,6 +229,15 @@ export class MediaSession {
       this.sttStream.onTranscript((result) => {
         this.silenceDetector?.recordActivity();
 
+        // Sprint 21 production validation -- best-effort STT latency:
+        // time from this utterance's first STT event (interim or final)
+        // to its finalized transcript. Not a pure provider-engine number
+        // (it includes however long the customer kept talking), but it's
+        // the closest proxy available without provider-level timestamps.
+        if (this.utteranceSttStartedAt === null) {
+          this.utteranceSttStartedAt = Date.now();
+        }
+
         // Barge-in is keyed off the STT provider's own detection of
         // speech (any transcript event, interim or final), never off raw
         // inbound audio frames -- Plivo streams continuous bidirectional
@@ -193,6 +249,12 @@ export class MediaSession {
         }
 
         if (result.isFinal) {
+          if (this.utteranceSttStartedAt !== null) {
+            this.logger.log(
+              `STT latency for call ${this.callId}: ${Date.now() - this.utteranceSttStartedAt}ms`,
+            );
+            this.utteranceSttStartedAt = null;
+          }
           this.pendingTranscript = "";
           void this.handleUserTurn(result.text);
         } else {
@@ -225,7 +287,13 @@ export class MediaSession {
         where: { callId: this.callId },
       });
       if (!conversation) {
-        this.logger.error(`No Conversation found for call ${this.callId} on media-stream start`);
+        // Unrecoverable: STT is already connected and hooked up at this
+        // point, so routing through handleError() (not a bare return)
+        // closes it instead of leaking it, and attempts a spoken apology
+        // + provider hangup instead of leaving the customer on dead air.
+        this.handleError(
+          new Error(`No Conversation found for call ${this.callId} on media-stream start`),
+        );
         return;
       }
       this.conversationId = conversation.id;
@@ -266,6 +334,12 @@ export class MediaSession {
       return;
     }
 
+    // Sprint 21 production validation -- "round-trip latency": from the
+    // finalized customer utterance to the reply being ready to speak
+    // (covers workflow + tool-calling + LLM time; TTS's own time-to-
+    // first-audio is logged separately inside speak()).
+    const turnStartedAt = Date.now();
+
     // A new utterance finalizing while a previous turn is still being
     // processed is itself a barge-in on the AI's "thinking" -- cancel it
     // rather than run two concurrent processMessage() calls for the same
@@ -285,6 +359,18 @@ export class MediaSession {
       lastTranscriptSnippet: text,
     });
 
+    // Sprint 21: bounds how long a single turn can wait on the LLM/tool
+    // pipeline. Without this, a stalled provider call (no SDK-level
+    // timeout is configured) could leave the customer "thinking" in
+    // silence indefinitely -- reuses the same abortSignal barge-in
+    // already threads through to provider.chat(), so a timeout aborts
+    // the in-flight call exactly like a customer interruption would.
+    let timedOut = false;
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, this.deps.mediaSessionConfig.aiResponseTimeoutMs);
+
     try {
       const result = await this.deps.conversationEngine.processMessage({
         workspaceId: this.workspaceId,
@@ -299,6 +385,9 @@ export class MediaSession {
       if (result.lastNodeKey) {
         this.updateLiveCallState({ currentWorkflowNodeKey: result.lastNodeKey });
       }
+      this.logger.log(
+        `Round-trip latency for call ${this.callId}: ${Date.now() - turnStartedAt}ms (utterance to reply-ready)`,
+      );
       // Only speak this result if it's still the current turn -- a newer
       // utterance may have superseded (and aborted) this one while
       // processMessage() was in flight; if the abort signal didn't stop
@@ -307,13 +396,21 @@ export class MediaSession {
         this.speak(result.content);
       }
     } catch (error) {
-      if (!abortController.signal.aborted) {
+      if (timedOut) {
+        this.logger.warn(
+          `Turn timed out after ${this.deps.mediaSessionConfig.aiResponseTimeoutMs}ms for call ${this.callId}`,
+        );
+        if (!this.closed && this.currentTurnAbort === abortController) {
+          this.speak(TURN_TIMEOUT_MESSAGE);
+        }
+      } else if (!abortController.signal.aborted) {
         this.logger.error(
           `Conversation engine failed to process a turn for call ${this.callId}`,
           error instanceof Error ? error.stack : String(error),
         );
       }
     } finally {
+      clearTimeout(timeoutHandle);
       if (this.currentTurnAbort === abortController) {
         this.currentTurnAbort = null;
       }
@@ -339,6 +436,9 @@ export class MediaSession {
       turnStartedAt: new Date(),
     });
 
+    const synthesisStartedAt = Date.now();
+    let firstChunkLogged = false;
+
     const stream = this.ttsProvider.synthesizeStream(text, {
       sampleRate: AUDIO_SAMPLE_RATE,
       encoding: AUDIO_ENCODING,
@@ -349,6 +449,14 @@ export class MediaSession {
 
     this.currentTtsStream = stream;
     stream.onAudioChunk((chunk) => {
+      if (!firstChunkLogged) {
+        // Sprint 21 production validation -- "TTS latency": time from
+        // synthesis request to the first audio chunk being ready.
+        firstChunkLogged = true;
+        this.logger.log(
+          `TTS latency for call ${this.callId}: ${Date.now() - synthesisStartedAt}ms (time to first audio chunk)`,
+        );
+      }
       if (this.ws.readyState !== WS_READY_STATE_OPEN) {
         return;
       }

@@ -104,10 +104,11 @@ export class WorkflowService extends BaseService {
     });
   }
 
-  async getWorkflowById(id: string): Promise<WorkflowWithNodes> {
+  /** Scoped to workspaceId -- a workflow belonging to another workspace is treated as not found (Sprint 21 tenant-isolation fix). */
+  async getWorkflowById(workspaceId: string, id: string): Promise<WorkflowWithNodes> {
     return this.throwIfNotFound(
       await this.prisma.workflow.findFirst({
-        where: this.applySoftDelete({ id }),
+        where: this.applySoftDelete({ id, workspaceId }),
         include: WITH_NODES,
       }),
       "Workflow",
@@ -162,8 +163,12 @@ export class WorkflowService extends BaseService {
     });
   }
 
-  async updateWorkflow(id: string, dto: UpdateWorkflowDto): Promise<Workflow> {
-    const workflow = await this.getWorkflowById(id);
+  async updateWorkflow(
+    workspaceId: string,
+    id: string,
+    dto: UpdateWorkflowDto,
+  ): Promise<Workflow> {
+    const workflow = await this.getWorkflowById(workspaceId, id);
     this.assertMutable(workflow);
 
     if (dto.aiAgentId) {
@@ -182,10 +187,11 @@ export class WorkflowService extends BaseService {
   }
 
   async addNode(
+    workspaceId: string,
     workflowId: string,
     dto: CreateWorkflowNodeDto,
   ): Promise<WorkflowNode> {
-    const workflow = await this.getWorkflowById(workflowId);
+    const workflow = await this.getWorkflowById(workspaceId, workflowId);
     this.assertMutable(workflow);
 
     const duplicate = workflow.nodes.find((node) => node.key === dto.key);
@@ -199,11 +205,12 @@ export class WorkflowService extends BaseService {
   }
 
   async updateNode(
+    workspaceId: string,
     workflowId: string,
     nodeId: string,
     dto: UpdateWorkflowNodeDto,
   ): Promise<WorkflowNode> {
-    const workflow = await this.getWorkflowById(workflowId);
+    const workflow = await this.getWorkflowById(workspaceId, workflowId);
     this.assertMutable(workflow);
 
     const node = this.throwIfNotFound(
@@ -218,8 +225,8 @@ export class WorkflowService extends BaseService {
     });
   }
 
-  async removeNode(workflowId: string, nodeId: string): Promise<void> {
-    const workflow = await this.getWorkflowById(workflowId);
+  async removeNode(workspaceId: string, workflowId: string, nodeId: string): Promise<void> {
+    const workflow = await this.getWorkflowById(workspaceId, workflowId);
     this.assertMutable(workflow);
 
     const node = this.throwIfNotFound(
@@ -231,13 +238,13 @@ export class WorkflowService extends BaseService {
     await this.prisma.workflowNode.delete({ where: { id: node.id } });
   }
 
-  async validateWorkflow(id: string): Promise<WorkflowValidationResult> {
-    const workflow = await this.getWorkflowById(id);
+  async validateWorkflow(workspaceId: string, id: string): Promise<WorkflowValidationResult> {
+    const workflow = await this.getWorkflowById(workspaceId, id);
     return this.runValidation(workflow);
   }
 
-  async publish(id: string): Promise<Workflow> {
-    const workflow = await this.getWorkflowById(id);
+  async publish(workspaceId: string, id: string): Promise<Workflow> {
+    const workflow = await this.getWorkflowById(workspaceId, id);
 
     if (workflow.status === WorkflowStatus.ARCHIVED) {
       throw new ConflictException("An archived workflow cannot be published");
@@ -264,8 +271,8 @@ export class WorkflowService extends BaseService {
     });
   }
 
-  async archive(id: string): Promise<Workflow> {
-    const workflow = await this.getWorkflowById(id);
+  async archive(workspaceId: string, id: string): Promise<Workflow> {
+    const workflow = await this.getWorkflowById(workspaceId, id);
 
     if (workflow.status === WorkflowStatus.ARCHIVED) {
       throw new ConflictException("Workflow is already archived");
@@ -277,8 +284,8 @@ export class WorkflowService extends BaseService {
     });
   }
 
-  async createNewVersion(id: string): Promise<WorkflowWithNodes> {
-    const source = await this.getWorkflowById(id);
+  async createNewVersion(workspaceId: string, id: string): Promise<WorkflowWithNodes> {
+    const source = await this.getWorkflowById(workspaceId, id);
 
     const latest = await this.prisma.workflow.findFirst({
       where: { workspaceId: source.workspaceId, slug: source.slug },
@@ -309,8 +316,8 @@ export class WorkflowService extends BaseService {
     });
   }
 
-  async softDeleteWorkflow(id: string): Promise<void> {
-    const workflow = await this.getWorkflowById(id);
+  async softDeleteWorkflow(workspaceId: string, id: string): Promise<void> {
+    const workflow = await this.getWorkflowById(workspaceId, id);
 
     if (workflow.isActive) {
       throw new ConflictException(

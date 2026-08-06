@@ -7,6 +7,7 @@ function setup() {
   const conversationEngine = {};
   const callQueueService = {};
   const voicePersonaConfigService = {};
+  const telephonyProviderFactory = {};
   const mediaSessionConfig = { silenceTimeoutMs: 2000, aiResponseTimeoutMs: 15000 };
 
   const gateway = new MediaStreamGateway(
@@ -16,6 +17,7 @@ function setup() {
     conversationEngine as never,
     callQueueService as never,
     voicePersonaConfigService as never,
+    telephonyProviderFactory as never,
     mediaSessionConfig,
   );
 

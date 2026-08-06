@@ -4,8 +4,18 @@ import { WorkflowNodeType } from "../../generated/prisma/client";
 import {
   CONDITION_OPERATORS,
   type ConditionNodeConfig,
+  type ConditionOperator,
   type WorkflowGraphNode,
 } from "../workflow.types";
+
+/** `exists`/`notExists` are the only operators that don't compare against a configured `value` -- see condition-evaluator.ts. */
+const OPERATORS_REQUIRING_VALUE: ReadonlySet<ConditionOperator> = new Set([
+  "equals",
+  "notEquals",
+  "contains",
+  "greaterThan",
+  "lessThan",
+]);
 
 export interface WorkflowValidationResult {
   valid: boolean;
@@ -126,6 +136,14 @@ export class WorkflowValidatorService {
           !CONDITION_OPERATORS.includes(conditionConfig.operator)
         ) {
           errors.push(`${prefix}: operator must be one of ${CONDITION_OPERATORS.join(", ")}`);
+        } else if (
+          OPERATORS_REQUIRING_VALUE.has(conditionConfig.operator) &&
+          conditionConfig.value === undefined
+        ) {
+          // Without this, an unset `value` against an unresolved `field`
+          // path evaluates `undefined === undefined` -> true at runtime,
+          // silently taking whenTrue instead of failing safe to whenFalse.
+          errors.push(`${prefix}: operator "${conditionConfig.operator}" requires a value`);
         }
         if (!isNonEmptyString(conditionConfig.whenTrue)) {
           errors.push(`${prefix}: whenTrue is required`);

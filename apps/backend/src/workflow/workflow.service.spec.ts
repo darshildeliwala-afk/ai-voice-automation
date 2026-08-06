@@ -117,7 +117,7 @@ describe("WorkflowService", () => {
       const { service, workflow } = setup();
       workflow.findFirst.mockResolvedValue(null);
 
-      await expect(service.getWorkflowById("missing")).rejects.toThrow(NotFoundException);
+      await expect(service.getWorkflowById(WORKSPACE_ID, "missing")).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -157,7 +157,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow());
       workflow.update.mockResolvedValue(draftWorkflow({ name: "New name" }));
 
-      const result = await service.updateWorkflow("wf-1", { name: "New name" });
+      const result = await service.updateWorkflow(WORKSPACE_ID, "wf-1", { name: "New name" });
 
       expect(result.name).toBe("New name");
     });
@@ -166,7 +166,7 @@ describe("WorkflowService", () => {
       const { service, workflow } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.PUBLISHED }));
 
-      await expect(service.updateWorkflow("wf-1", { name: "x" })).rejects.toThrow(ConflictException);
+      await expect(service.updateWorkflow(WORKSPACE_ID, "wf-1", { name: "x" })).rejects.toThrow(ConflictException);
     });
   });
 
@@ -176,7 +176,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow());
 
       await expect(
-        service.addNode("wf-1", { key: "start", type: WorkflowNodeType.END, config: {} }),
+        service.addNode(WORKSPACE_ID, "wf-1", { key: "start", type: WorkflowNodeType.END, config: {} }),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -185,7 +185,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow());
       workflowNode.create.mockResolvedValue({ id: "node-2", key: "second" });
 
-      const result = await service.addNode("wf-1", {
+      const result = await service.addNode(WORKSPACE_ID, "wf-1", {
         key: "second",
         type: WorkflowNodeType.END,
         config: {},
@@ -199,7 +199,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.PUBLISHED }));
 
       await expect(
-        service.addNode("wf-1", { key: "second", type: WorkflowNodeType.END, config: {} }),
+        service.addNode(WORKSPACE_ID, "wf-1", { key: "second", type: WorkflowNodeType.END, config: {} }),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -207,7 +207,7 @@ describe("WorkflowService", () => {
       const { service, workflow } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow());
 
-      await expect(service.updateNode("wf-1", "nonexistent", { config: {} })).rejects.toThrow(
+      await expect(service.updateNode(WORKSPACE_ID, "wf-1", "nonexistent", { config: {} })).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -216,7 +216,7 @@ describe("WorkflowService", () => {
       const { service, workflow, workflowNode } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow());
 
-      await service.removeNode("wf-1", "node-1");
+      await service.removeNode(WORKSPACE_ID, "wf-1", "node-1");
 
       expect(workflowNode.delete).toHaveBeenCalledWith({ where: { id: "node-1" } });
     });
@@ -227,7 +227,7 @@ describe("WorkflowService", () => {
       const { service, workflow, validator } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow());
 
-      await service.validateWorkflow("wf-1");
+      await service.validateWorkflow(WORKSPACE_ID, "wf-1");
 
       expect(validator.validate).toHaveBeenCalledWith(
         [{ key: "start", type: WorkflowNodeType.END, config: {} }],
@@ -243,14 +243,14 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow());
       validator.validate.mockReturnValue({ valid: false, errors: ["bad graph"] });
 
-      await expect(service.publish("wf-1")).rejects.toThrow(BadRequestException);
+      await expect(service.publish(WORKSPACE_ID, "wf-1")).rejects.toThrow(BadRequestException);
     });
 
     it("rejects publishing an ARCHIVED workflow", async () => {
       const { service, workflow } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.ARCHIVED }));
 
-      await expect(service.publish("wf-1")).rejects.toThrow(ConflictException);
+      await expect(service.publish(WORKSPACE_ID, "wf-1")).rejects.toThrow(ConflictException);
     });
 
     it("deactivates sibling active workflows and publishes this one in a transaction", async () => {
@@ -258,7 +258,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow());
       workflow.update.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.PUBLISHED, isActive: true }));
 
-      const result = await service.publish("wf-1");
+      const result = await service.publish(WORKSPACE_ID, "wf-1");
 
       expect(workflow.updateMany).toHaveBeenCalledWith({
         where: { workspaceId: WORKSPACE_ID, slug: "order-support", isActive: true },
@@ -278,7 +278,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.PUBLISHED, isActive: true }));
       workflow.update.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.ARCHIVED, isActive: false }));
 
-      const result = await service.archive("wf-1");
+      const result = await service.archive(WORKSPACE_ID, "wf-1");
 
       expect(workflow.update).toHaveBeenCalledWith({
         where: { id: "wf-1" },
@@ -291,7 +291,7 @@ describe("WorkflowService", () => {
       const { service, workflow } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow({ status: WorkflowStatus.ARCHIVED }));
 
-      await expect(service.archive("wf-1")).rejects.toThrow(ConflictException);
+      await expect(service.archive(WORKSPACE_ID, "wf-1")).rejects.toThrow(ConflictException);
     });
   });
 
@@ -304,7 +304,7 @@ describe("WorkflowService", () => {
         .mockResolvedValueOnce(draftWorkflow({ version: 3 })); // latest version lookup
       workflow.create.mockResolvedValue(draftWorkflow({ id: "wf-4", version: 4, status: WorkflowStatus.DRAFT }));
 
-      const result = await service.createNewVersion("wf-1");
+      const result = await service.createNewVersion(WORKSPACE_ID, "wf-1");
 
       expect(workflow.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
@@ -325,7 +325,7 @@ describe("WorkflowService", () => {
       const { service, workflow } = setup();
       workflow.findFirst.mockResolvedValue(draftWorkflow({ isActive: true }));
 
-      await expect(service.softDeleteWorkflow("wf-1")).rejects.toThrow(ConflictException);
+      await expect(service.softDeleteWorkflow(WORKSPACE_ID, "wf-1")).rejects.toThrow(ConflictException);
     });
 
     it("soft-deletes an inactive workflow", async () => {
@@ -333,7 +333,7 @@ describe("WorkflowService", () => {
       workflow.findFirst.mockResolvedValue(draftWorkflow({ isActive: false }));
       workflow.update.mockResolvedValue(draftWorkflow({ deletedAt: new Date() }));
 
-      await service.softDeleteWorkflow("wf-1");
+      await service.softDeleteWorkflow(WORKSPACE_ID, "wf-1");
 
       expect(workflow.update).toHaveBeenCalledWith({
         where: { id: "wf-1" },

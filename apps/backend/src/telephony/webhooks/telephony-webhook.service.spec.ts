@@ -15,7 +15,10 @@ function uniqueConstraintError(): Prisma.PrismaClientKnownRequestError {
 
 function setup() {
   const call = { findFirst: jest.fn(), update: jest.fn() };
-  const telephonyWebhookEvent = { create: jest.fn().mockResolvedValue({}) };
+  const telephonyWebhookEvent = {
+    findFirst: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({}),
+  };
   const prisma = { call, telephonyWebhookEvent };
 
   const validateWebhook = jest.fn();
@@ -238,13 +241,11 @@ describe("TelephonyWebhookService", () => {
       );
     });
 
-    it("skips applying the event again on a duplicate delivery (unique constraint hit)", async () => {
+    it("skips applying the event again on a duplicate delivery (already recorded as processed)", async () => {
       const { service, call, telephonyWebhookEvent, fakeProvider } = setup();
       call.findFirst.mockResolvedValue(baseCallRow());
       fakeProvider.normalizeWebhookEvent.mockReturnValue(baseEvent());
-      telephonyWebhookEvent.create.mockRejectedValue(
-        uniqueConstraintError(),
-      );
+      telephonyWebhookEvent.findFirst.mockResolvedValue({ id: "existing-event" });
 
       await service.processWebhook({
         callId: CALL_ID,
@@ -261,9 +262,7 @@ describe("TelephonyWebhookService", () => {
       const { service, call, telephonyWebhookEvent, fakeProvider } = setup();
       call.findFirst.mockResolvedValue(baseCallRow());
       fakeProvider.normalizeWebhookEvent.mockReturnValue(baseEvent());
-      telephonyWebhookEvent.create.mockRejectedValue(
-        uniqueConstraintError(),
-      );
+      telephonyWebhookEvent.findFirst.mockResolvedValue({ id: "existing-event" });
 
       const result = await service.processWebhook({
         callId: CALL_ID,
@@ -274,6 +273,44 @@ describe("TelephonyWebhookService", () => {
       });
 
       expect(result).toEqual({ contentType: "text/xml", body: "<Response/>" });
+    });
+
+    it("records the event as processed only after applyEventToCall succeeds, so a mid-apply failure never marks it done (Sprint 21)", async () => {
+      const { service, call, telephonyWebhookEvent, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(baseCallRow());
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(baseEvent());
+      call.update.mockRejectedValue(new Error("db blip"));
+
+      await expect(
+        service.processWebhook({
+          callId: CALL_ID,
+          type: "hangup",
+          url: "https://example.com/telephony/webhook",
+          headers: {},
+          body: {},
+        }),
+      ).rejects.toThrow("db blip");
+
+      expect(telephonyWebhookEvent.create).not.toHaveBeenCalled();
+    });
+
+    it("swallows a P2002 on the final record-as-processed insert (a concurrent delivery recorded it first) rather than throwing", async () => {
+      const { service, call, telephonyWebhookEvent, fakeProvider } = setup();
+      call.findFirst.mockResolvedValue(baseCallRow());
+      fakeProvider.normalizeWebhookEvent.mockReturnValue(baseEvent());
+      telephonyWebhookEvent.create.mockRejectedValue(uniqueConstraintError());
+
+      await expect(
+        service.processWebhook({
+          callId: CALL_ID,
+          type: "hangup",
+          url: "https://example.com/telephony/webhook",
+          headers: {},
+          body: {},
+        }),
+      ).resolves.not.toThrow();
+
+      expect(call.update).toHaveBeenCalledTimes(1);
     });
   });
 

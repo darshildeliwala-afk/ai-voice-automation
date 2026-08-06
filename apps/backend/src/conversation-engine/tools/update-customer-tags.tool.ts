@@ -35,10 +35,12 @@ export class UpdateCustomerTagsTool implements IAITool {
       properties: {
         add: {
           type: "array",
+          items: { type: "string" },
           description: "Tags to add, e.g. ['Hot Lead'].",
         },
         remove: {
           type: "array",
+          items: { type: "string" },
           description: "Tags to remove, e.g. ['Cold Lead'].",
         },
       },

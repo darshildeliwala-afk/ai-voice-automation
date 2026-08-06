@@ -40,7 +40,22 @@ describe("ConversationService", () => {
       const { service, conversation } = setup();
       conversation.findFirst.mockResolvedValue(null);
 
-      await expect(service.getConversationDetail("missing")).rejects.toThrow();
+      await expect(service.getConversationDetail(WORKSPACE_ID, "missing")).rejects.toThrow();
+    });
+
+    it("scopes the lookup to workspaceId, never leaking another workspace's conversation (Sprint 21)", async () => {
+      const { service, conversation } = setup();
+      conversation.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.getConversationDetail("other-workspace", CONVERSATION_ID),
+      ).rejects.toThrow();
+
+      expect(conversation.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: CONVERSATION_ID, workspaceId: "other-workspace" },
+        }),
+      );
     });
 
     it("returns messages ordered ascending and the conversation's summary", async () => {
@@ -75,7 +90,7 @@ describe("ConversationService", () => {
         },
       ]);
 
-      const result = await service.getConversationDetail(CONVERSATION_ID);
+      const result = await service.getConversationDetail(WORKSPACE_ID, CONVERSATION_ID);
 
       expect(conversationMessage.findMany).toHaveBeenCalledWith({
         where: { conversationId: CONVERSATION_ID },
@@ -130,7 +145,7 @@ describe("ConversationService", () => {
         },
       ]);
 
-      const result = await service.getConversationDetail(CONVERSATION_ID);
+      const result = await service.getConversationDetail(WORKSPACE_ID, CONVERSATION_ID);
 
       expect(result.toolCalls).toEqual([
         {
@@ -173,7 +188,7 @@ describe("ConversationService", () => {
         },
       ]);
 
-      const result = await service.getConversationDetail(CONVERSATION_ID);
+      const result = await service.getConversationDetail(WORKSPACE_ID, CONVERSATION_ID);
 
       expect(result.toolCalls).toEqual([
         { toolName: "end_call", input: {}, output: null, createdAt: expect.any(String) },
@@ -201,7 +216,7 @@ describe("ConversationService", () => {
         { promptTokens: 5, completionTokens: 2, totalTokens: 7, estimatedCost: 0.0005, latencyMs: null },
       ]);
 
-      const result = await service.getConversationDetail(CONVERSATION_ID);
+      const result = await service.getConversationDetail(WORKSPACE_ID, CONVERSATION_ID);
 
       expect(result.usage).toEqual({
         promptTokens: 35,
@@ -229,7 +244,7 @@ describe("ConversationService", () => {
       });
       aIUsage.findMany.mockResolvedValue([]);
 
-      const result = await service.getConversationDetail(CONVERSATION_ID);
+      const result = await service.getConversationDetail(WORKSPACE_ID, CONVERSATION_ID);
 
       expect(result.usage.avgLatencyMs).toBeNull();
     });

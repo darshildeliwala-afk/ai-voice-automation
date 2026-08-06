@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 
 import { estimateCost } from "../../../ai/pricing/ai-pricing";
 import { AIToolExecutor } from "../../../conversation-engine/tools/ai-tool-executor";
@@ -17,6 +17,10 @@ import type {
 
 const MAX_TOOL_ITERATIONS = 5;
 
+/** Spoken when the model exhausts MAX_TOOL_ITERATIONS without ever returning a plain-text reply, so a live call never goes silent for the turn (Sprint 21 production validation). */
+const TOOL_LOOP_EXHAUSTED_FALLBACK =
+  "Sorry, let me come back to that in just a moment.";
+
 /**
  * Lets the model decide what to say (and, unless allowTools:false, which
  * registered AI tools to call) for this step. This is the Sprint 15
@@ -30,6 +34,8 @@ const MAX_TOOL_ITERATIONS = 5;
  */
 @Injectable()
 export class PromptNodeHandler implements IWorkflowNodeHandler {
+  private readonly logger = new Logger(PromptNodeHandler.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly toolExecutor: AIToolExecutor,
@@ -73,6 +79,12 @@ export class PromptNodeHandler implements IWorkflowNodeHandler {
         signal: context.abortSignal,
       });
       const callLatencyMs = Date.now() - callStartedAt;
+      // Sprint 21 production validation -- also persisted per-call to
+      // AIUsage.latencyMs below (surfaced via the admin dashboard's
+      // avgResponseTimeMs), logged here too for direct log visibility.
+      this.logger.log(
+        `LLM latency for conversation ${context.conversationId}: ${callLatencyMs}ms (${completion.model})`,
+      );
 
       const cost = estimateCost(
         context.providerName,
@@ -156,6 +168,21 @@ export class PromptNodeHandler implements IWorkflowNodeHandler {
         terminal = true;
         break;
       }
+    }
+
+    if (!content && !terminal) {
+      // The model kept requesting tools for every one of
+      // MAX_TOOL_ITERATIONS rounds without ever returning a plain-text
+      // reply -- without this, the turn would silently produce no
+      // spoken content at all.
+      content = TOOL_LOOP_EXHAUSTED_FALLBACK;
+      await persistMessage(
+        this.prisma,
+        context.conversationId,
+        ConversationRole.ASSISTANT,
+        content,
+      );
+      context.messages.push({ role: "assistant", content });
     }
 
     return {

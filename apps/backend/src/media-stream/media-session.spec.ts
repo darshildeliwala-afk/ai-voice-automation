@@ -70,6 +70,7 @@ function setup(personaOverrides: Partial<typeof PERSONA> = {}) {
     customerId: "customer-1",
     orderId: "order-1",
     callQueueId: "cq-1",
+    providerCallId: "provider-call-1",
   };
   const prisma = {
     call: { findFirst: jest.fn().mockResolvedValue(call) },
@@ -118,6 +119,11 @@ function setup(personaOverrides: Partial<typeof PERSONA> = {}) {
 
   const mediaSessionConfig = { silenceTimeoutMs: 2000, aiResponseTimeoutMs: 15000 };
 
+  const providerHangup = jest.fn().mockResolvedValue({ success: true, rawResponse: {} });
+  const telephonyProviderFactory = {
+    createForWorkspace: jest.fn().mockResolvedValue({ hangup: providerHangup }),
+  };
+
   const deps: MediaSessionDeps = {
     prisma: prisma as never,
     sttProviderFactory: sttProviderFactory as never,
@@ -125,6 +131,7 @@ function setup(personaOverrides: Partial<typeof PERSONA> = {}) {
     conversationEngine: conversationEngine as never,
     callQueueService: callQueueService as never,
     voicePersonaConfigService: voicePersonaConfigService as never,
+    telephonyProviderFactory: telephonyProviderFactory as never,
     mediaSessionConfig,
   };
 
@@ -143,6 +150,8 @@ function setup(personaOverrides: Partial<typeof PERSONA> = {}) {
     ttsStreams,
     sttStream,
     conversationEngine,
+    telephonyProviderFactory,
+    providerHangup,
   };
 }
 
@@ -244,6 +253,40 @@ describe("MediaSession", () => {
     expect(capturedSignal?.aborted).toBe(true);
   });
 
+  it("aborts and speaks a fallback when a turn exceeds aiResponseTimeoutMs (Sprint 21)", async () => {
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+    try {
+      const { session, sttStream, conversationEngine, prisma, synthesizeStream } = setup();
+      prisma.conversationMessage.findFirst.mockResolvedValue(null); // no greeting -- isolate to the turn
+      session.handleMessage(startEvent());
+      await flush();
+
+      let capturedSignal: AbortSignal | undefined;
+      conversationEngine.processMessage.mockImplementationOnce(
+        (input: never) =>
+          new Promise((_resolve, reject) => {
+            capturedSignal = (input as { abortSignal: AbortSignal }).abortSignal;
+            capturedSignal.addEventListener("abort", () => reject(new Error("aborted")));
+          }),
+      );
+
+      sttStream.emitTranscript({ text: "Mera order kahan hai?", isFinal: true });
+      await flush();
+      expect(capturedSignal?.aborted).toBe(false);
+
+      jest.advanceTimersByTime(15000);
+      await flush();
+
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(synthesizeStream).toHaveBeenCalledWith(
+        expect.stringContaining("taking longer"),
+        expect.anything(),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("does not barge in when the persona has bargeInEnabled: false", async () => {
     const { session, ttsStreams, sttStream } = setup({ bargeInEnabled: false });
 
@@ -317,6 +360,64 @@ describe("MediaSession", () => {
 
     expect(sttStream.close).toHaveBeenCalledTimes(1);
     expect(ttsStreams[0].cancel).toHaveBeenCalledTimes(1);
+  });
+
+  describe("unrecoverable-failure handling (Sprint 21 production validation)", () => {
+    it("handleError speaks a best-effort apology and hangs up the underlying call via the telephony provider", async () => {
+      const { session, synthesizeStream, telephonyProviderFactory, providerHangup } = setup();
+
+      session.handleMessage(startEvent());
+      await flush();
+      synthesizeStream.mockClear();
+
+      session.handleError(new Error("stt exploded"));
+      await flush();
+
+      expect(synthesizeStream).toHaveBeenCalledWith(
+        expect.stringContaining("technical issue"),
+        expect.anything(),
+      );
+      expect(telephonyProviderFactory.createForWorkspace).toHaveBeenCalledWith(WORKSPACE_ID);
+      expect(providerHangup).toHaveBeenCalledWith("provider-call-1");
+    });
+
+    it("handleError never throws when the provider hangup itself fails", async () => {
+      const { session, telephonyProviderFactory } = setup();
+      telephonyProviderFactory.createForWorkspace.mockRejectedValue(new Error("provider down"));
+
+      session.handleMessage(startEvent());
+      await flush();
+
+      expect(() => session.handleError(new Error("stt exploded"))).not.toThrow();
+      await flush();
+    });
+
+    it("skips the apology (no TTS ready yet) but still attempts hangup when setup fails before the greeting plays", async () => {
+      const { session, prisma, synthesizeStream, providerHangup } = setup();
+      prisma.conversation.findUnique.mockResolvedValue(null); // triggers the "no Conversation found" unrecoverable path
+
+      session.handleMessage(startEvent());
+      await flush();
+
+      // TTS was already resolved by this point in onStart(), so the
+      // apology *can* play here -- this exercises the "conversation
+      // missing" unrecoverable-setup path specifically.
+      expect(synthesizeStream).toHaveBeenCalledWith(
+        expect.stringContaining("technical issue"),
+        expect.anything(),
+      );
+      expect(providerHangup).toHaveBeenCalledWith("provider-call-1");
+    });
+
+    it("closes the websocket when the Call row itself can't be found (nothing else was set up yet)", async () => {
+      const { session, prisma, ws } = setup();
+      prisma.call.findFirst.mockResolvedValue(null);
+
+      session.handleMessage(startEvent());
+      await flush();
+
+      expect(ws.close).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("race conditions between overlapping turns", () => {

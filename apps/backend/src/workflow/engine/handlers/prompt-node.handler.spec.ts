@@ -213,6 +213,32 @@ describe("PromptNodeHandler", () => {
     expect(chat).toHaveBeenCalledTimes(5);
   });
 
+  it("falls back to a spoken message instead of silent empty content when the tool loop is exhausted (Sprint 21)", async () => {
+    const { handler, chat, context, toolExecutor, conversationMessage } = setup();
+    toolExecutor.execute.mockResolvedValue({ content: "{}" });
+    chat.mockResolvedValue({
+      content: "",
+      model: "gpt-4o-mini",
+      promptTokens: 1,
+      completionTokens: 1,
+      totalTokens: 2,
+      rawResponse: {},
+      toolCalls: [{ id: "call_x", name: "lookup_order", arguments: {} }],
+    });
+
+    const node = { key: "start", type: WorkflowNodeType.PROMPT, config: { next: "end" } };
+    const result = await handler.execute(node, context);
+
+    expect(result.content).not.toBe("");
+    expect(result.terminal).toBe(false);
+    expect(result.next).toBe("end");
+    expect(conversationMessage.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: "ASSISTANT", content: result.content }),
+      }),
+    );
+  });
+
   it("forwards context.abortSignal into provider.chat() as signal (barge-in cancellation)", async () => {
     const { handler, chat, context } = setup();
     const controller = new AbortController();

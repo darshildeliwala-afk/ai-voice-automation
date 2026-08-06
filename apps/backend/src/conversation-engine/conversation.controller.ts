@@ -1,5 +1,11 @@
-import { Controller, Get, Param, ParseUUIDPipe, Query } from "@nestjs/common";
-import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import {
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Query,
+} from "@nestjs/common";
+import { ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 
 import { ConversationService } from "./conversation.service";
 import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
@@ -30,7 +36,11 @@ export class ConversationController {
   @ApiOperation({
     summary: "Conversation detail -- messages, tool calls, token usage/cost/latency, sentiment, summary",
   })
-  getDetail(@Param("id", ParseUUIDPipe) id: string) {
-    return this.conversationService.getConversationDetail(id);
+  @ApiQuery({ name: "workspaceId", required: true, description: "Caller's workspace, for tenant-isolation" })
+  getDetail(
+    @Query("workspaceId", ParseUUIDPipe) workspaceId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return this.conversationService.getConversationDetail(workspaceId, id);
   }
 }

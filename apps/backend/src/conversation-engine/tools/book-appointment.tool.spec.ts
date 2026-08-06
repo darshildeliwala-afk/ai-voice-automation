@@ -56,6 +56,30 @@ describe("BookAppointmentTool", () => {
     expect(appointmentService.createAppointment).not.toHaveBeenCalled();
   });
 
+  it("rejects an invalid calendar date instead of silently rolling it over (Sprint 21)", async () => {
+    const { tool, appointmentService } = setup();
+
+    const result = await tool.execute(
+      { date: "2026-02-30", time: "15:00", timezone: "Asia/Kolkata" },
+      CONTEXT,
+    );
+
+    expect(JSON.parse(result.content).error).toBeDefined();
+    expect(appointmentService.createAppointment).not.toHaveBeenCalled();
+  });
+
+  it("rejects a date that has already passed (Sprint 21)", async () => {
+    const { tool, appointmentService } = setup();
+
+    const result = await tool.execute(
+      { date: "2020-01-01", time: "15:00", timezone: "Asia/Kolkata" },
+      CONTEXT,
+    );
+
+    expect(JSON.parse(result.content).error).toBeDefined();
+    expect(appointmentService.createAppointment).not.toHaveBeenCalled();
+  });
+
   it("returns a graceful error for an invalid time format", async () => {
     const { tool, appointmentService } = setup();
 

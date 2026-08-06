@@ -3,12 +3,19 @@ import { Module } from "@nestjs/common";
 import { AiModule } from "../ai/ai.module";
 import { CallQueueModule } from "../call-queue/call-queue.module";
 import { ConversationEngineModule } from "../conversation-engine/conversation-engine.module";
+import { TelephonyModule } from "../telephony/telephony.module";
 import { WorkspaceSettingsModule } from "../workspace-settings/workspace-settings.module";
 import { MEDIA_SESSION_CONFIG, loadMediaSessionConfig } from "./media-session.config";
 import { MediaStreamGateway } from "./media-stream.gateway";
 
 @Module({
-  imports: [AiModule, ConversationEngineModule, CallQueueModule, WorkspaceSettingsModule],
+  imports: [
+    AiModule,
+    ConversationEngineModule,
+    CallQueueModule,
+    WorkspaceSettingsModule,
+    TelephonyModule,
+  ],
   providers: [
     MediaStreamGateway,
     { provide: MEDIA_SESSION_CONFIG, useFactory: loadMediaSessionConfig },

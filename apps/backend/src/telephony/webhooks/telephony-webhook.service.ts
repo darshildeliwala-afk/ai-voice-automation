@@ -87,14 +87,16 @@ export class TelephonyWebhookService {
 
     this.assertEventCorrelatesToCall(call, event);
 
-    const wasNew = await this.recordEventOnceOrSkip(
+    const dedupKey =
+      event.providerCallId || event.providerRequestId || context.callId;
+
+    const alreadyProcessed = await this.wasEventAlreadyProcessed(
       call.provider,
-      event.providerCallId || event.providerRequestId || context.callId,
+      dedupKey,
       event.eventKey,
-      context.body,
     );
 
-    if (!wasNew) {
+    if (alreadyProcessed) {
       this.logger.log(
         `Ignoring duplicate ${call.provider} webhook event ${event.eventKey} for call ${call.id}`,
       );
@@ -106,6 +108,18 @@ export class TelephonyWebhookService {
     }
 
     await this.applyEventToCall(call, event);
+
+    // Recorded only *after* the event has been fully applied (Sprint 21
+    // fix) -- previously this was recorded first, so a transient failure
+    // inside applyEventToCall would still mark the event processed, and a
+    // Plivo retry would then be silently skipped forever instead of
+    // re-attempting (permanently stranding the call with no Conversation
+    // ever created). The narrower tradeoff this accepts: two truly
+    // concurrent deliveries of the same event could both pass the
+    // "already processed?" check and both run applyEventToCall -- Plivo's
+    // retry model is sequential-on-timeout in practice, not parallel, so
+    // this is judged the safer default.
+    await this.recordEventProcessed(call.provider, dedupKey, event.eventKey, context.body);
 
     if (context.type === "answer") {
       return provider.buildAnswerResponse({
@@ -163,18 +177,35 @@ export class TelephonyWebhookService {
     }
   }
 
+  /** Pre-check against the (provider, providerCallId, eventType) idempotency boundary -- see recordEventProcessed(). */
+  private async wasEventAlreadyProcessed(
+    provider: Call["provider"],
+    providerCallId: string,
+    eventType: string,
+  ): Promise<boolean> {
+    const existing = await this.prisma.telephonyWebhookEvent.findFirst({
+      where: { provider, providerCallId, eventType },
+      select: { id: true },
+    });
+    return existing !== null;
+  }
+
   /**
    * Inserts a TelephonyWebhookEvent row guarded by a unique constraint on
    * (provider, providerCallId, eventType) -- the idempotency boundary.
-   * Returns false (and does nothing else) when the event was already
-   * recorded, so a redelivered webhook never double-applies.
+   * Called only after the event's effects have already been applied (see
+   * processWebhook) so a failure applying the event never gets marked as
+   * processed. A P2002 here (someone else recorded it concurrently, after
+   * this request's own wasEventAlreadyProcessed() check passed) is
+   * swallowed, not thrown -- the event was still applied correctly by
+   * this request either way.
    */
-  private async recordEventOnceOrSkip(
+  private async recordEventProcessed(
     provider: Call["provider"],
     providerCallId: string,
     eventType: string,
     payload: Record<string, unknown>,
-  ): Promise<boolean> {
+  ): Promise<void> {
     try {
       await this.prisma.telephonyWebhookEvent.create({
         data: {
@@ -184,13 +215,12 @@ export class TelephonyWebhookService {
           payload: payload as Prisma.InputJsonValue,
         },
       });
-      return true;
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       ) {
-        return false;
+        return;
       }
       throw error;
     }

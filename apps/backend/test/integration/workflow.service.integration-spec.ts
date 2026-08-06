@@ -48,6 +48,40 @@ describe("WorkflowService (integration, real Postgres)", () => {
     await prisma.$disconnect();
   });
 
+  it("never lets a workflow be read or mutated through another workspace's id (Sprint 21 tenant isolation)", async () => {
+    const workflow = await workflowService.createWorkflow(workspaceId, {
+      slug: `tenant-isolation-flow-${randomUUID()}`,
+      name: "Tenant isolation flow",
+      entryNodeKey: "end",
+      nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
+    });
+
+    const otherWorkspaceId = randomUUID();
+    await prisma.$executeRaw`
+      INSERT INTO "Workspace" (id, name, slug, "createdAt", "updatedAt")
+      VALUES (${otherWorkspaceId}::uuid, 'Other Workflow IT Workspace', ${`wf-svc-it-other-${Date.now()}`}, now(), now())
+    `;
+
+    await expect(
+      workflowService.getWorkflowById(otherWorkspaceId, workflow.id),
+    ).rejects.toThrow();
+    await expect(
+      workflowService.updateWorkflow(otherWorkspaceId, workflow.id, { name: "Hijacked" }),
+    ).rejects.toThrow();
+    await expect(
+      workflowService.publish(otherWorkspaceId, workflow.id),
+    ).rejects.toThrow();
+    await expect(
+      workflowService.softDeleteWorkflow(otherWorkspaceId, workflow.id),
+    ).rejects.toThrow();
+
+    // Still fully accessible from its own workspace.
+    const reloaded = await workflowService.getWorkflowById(workspaceId, workflow.id);
+    expect(reloaded.id).toBe(workflow.id);
+
+    await prisma.$executeRaw`DELETE FROM "Workspace" WHERE id = ${otherWorkspaceId}::uuid`;
+  });
+
   it("creates a workflow with nested nodes and reads it back", async () => {
     const workflow = await workflowService.createWorkflow(workspaceId, {
       slug: `crud-flow-${randomUUID()}`,
@@ -60,7 +94,7 @@ describe("WorkflowService (integration, real Postgres)", () => {
     expect(workflow.status).toBe("DRAFT");
     expect(workflow.nodes).toHaveLength(1);
 
-    const reloaded = await workflowService.getWorkflowById(workflow.id);
+    const reloaded = await workflowService.getWorkflowById(workspaceId, workflow.id);
     expect(reloaded.nodes[0]).toMatchObject({ key: "end", type: "END" });
   });
 
@@ -79,19 +113,19 @@ describe("WorkflowService (integration, real Postgres)", () => {
       name: "Node CRUD flow",
     });
 
-    const node = await workflowService.addNode(workflow.id, {
+    const node = await workflowService.addNode(workspaceId, workflow.id, {
       key: "end",
       type: WorkflowNodeType.END,
       config: { reason: "initial" },
     });
 
-    const updated = await workflowService.updateNode(workflow.id, node.id, {
+    const updated = await workflowService.updateNode(workspaceId, workflow.id, node.id, {
       config: { reason: "updated" },
     });
     expect(updated.config).toEqual({ reason: "updated" });
 
-    await workflowService.removeNode(workflow.id, node.id);
-    const reloaded = await workflowService.getWorkflowById(workflow.id);
+    await workflowService.removeNode(workspaceId, workflow.id, node.id);
+    const reloaded = await workflowService.getWorkflowById(workspaceId, workflow.id);
     expect(reloaded.nodes).toHaveLength(0);
   });
 
@@ -103,7 +137,7 @@ describe("WorkflowService (integration, real Postgres)", () => {
       nodes: [{ key: "t", type: WorkflowNodeType.TOOL, config: { toolName: "not_a_real_tool" } }],
     });
 
-    await expect(workflowService.publish(workflow.id)).rejects.toThrow();
+    await expect(workflowService.publish(workspaceId, workflow.id)).rejects.toThrow();
   });
 
   it("publishing a new version deactivates the previously active version (real DB transaction)", async () => {
@@ -114,16 +148,16 @@ describe("WorkflowService (integration, real Postgres)", () => {
       entryNodeKey: "end",
       nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
     });
-    const publishedV1 = await workflowService.publish(v1.id);
+    const publishedV1 = await workflowService.publish(workspaceId, v1.id);
     expect(publishedV1.isActive).toBe(true);
 
-    const v2 = await workflowService.createNewVersion(v1.id);
+    const v2 = await workflowService.createNewVersion(workspaceId, v1.id);
     expect(v2.version).toBe(2);
     expect(v2.nodes).toHaveLength(1);
-    await workflowService.publish(v2.id);
+    await workflowService.publish(workspaceId, v2.id);
 
-    const v1Reloaded = await workflowService.getWorkflowById(v1.id);
-    const v2Reloaded = await workflowService.getWorkflowById(v2.id);
+    const v1Reloaded = await workflowService.getWorkflowById(workspaceId, v1.id);
+    const v2Reloaded = await workflowService.getWorkflowById(workspaceId, v2.id);
     expect(v1Reloaded.isActive).toBe(false);
     expect(v1Reloaded.status).toBe("PUBLISHED");
     expect(v2Reloaded.isActive).toBe(true);
@@ -139,9 +173,9 @@ describe("WorkflowService (integration, real Postgres)", () => {
       entryNodeKey: "end",
       nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
     });
-    await workflowService.publish(workflow.id);
+    await workflowService.publish(workspaceId, workflow.id);
 
-    const archived = await workflowService.archive(workflow.id);
+    const archived = await workflowService.archive(workspaceId, workflow.id);
     expect(archived.status).toBe("ARCHIVED");
     expect(archived.isActive).toBe(false);
   });
@@ -153,14 +187,14 @@ describe("WorkflowService (integration, real Postgres)", () => {
       entryNodeKey: "end",
       nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
     });
-    await workflowService.publish(workflow.id);
+    await workflowService.publish(workspaceId, workflow.id);
 
-    await expect(workflowService.softDeleteWorkflow(workflow.id)).rejects.toThrow();
+    await expect(workflowService.softDeleteWorkflow(workspaceId, workflow.id)).rejects.toThrow();
 
-    await workflowService.archive(workflow.id);
-    await workflowService.softDeleteWorkflow(workflow.id);
+    await workflowService.archive(workspaceId, workflow.id);
+    await workflowService.softDeleteWorkflow(workspaceId, workflow.id);
 
-    await expect(workflowService.getWorkflowById(workflow.id)).rejects.toThrow();
+    await expect(workflowService.getWorkflowById(workspaceId, workflow.id)).rejects.toThrow();
   });
 
   it("listWorkflows returns only the latest version per slug", async () => {
@@ -171,8 +205,8 @@ describe("WorkflowService (integration, real Postgres)", () => {
       entryNodeKey: "end",
       nodes: [{ key: "end", type: WorkflowNodeType.END, config: {} }],
     });
-    await workflowService.publish(v1.id);
-    const v2 = await workflowService.createNewVersion(v1.id);
+    await workflowService.publish(workspaceId, v1.id);
+    const v2 = await workflowService.createNewVersion(workspaceId, v1.id);
 
     const result = await workflowService.listWorkflows(workspaceId, { page: 1, limit: 100 });
     const matching = result.data.filter((w) => w.slug === slug);
@@ -182,7 +216,7 @@ describe("WorkflowService (integration, real Postgres)", () => {
     // v1 is still PUBLISHED+isActive (never superseded, since v2 was never
     // published) -- archive it so it doesn't leak into later
     // resolveActiveGraph fallback tests as a workspace-default workflow.
-    await workflowService.archive(v1.id);
+    await workflowService.archive(workspaceId, v1.id);
   });
 
   describe("resolveActiveGraph", () => {
@@ -237,7 +271,7 @@ describe("WorkflowService (integration, real Postgres)", () => {
         entryNodeKey: "ws-end",
         nodes: [{ key: "ws-end", type: WorkflowNodeType.END, config: {} }],
       });
-      await workflowService.publish(workspaceDefault.id);
+      await workflowService.publish(resolveWorkspaceId, workspaceDefault.id);
 
       const agentFlow = await workflowService.createWorkflow(resolveWorkspaceId, {
         aiAgentId: agent.id,
@@ -246,12 +280,12 @@ describe("WorkflowService (integration, real Postgres)", () => {
         entryNodeKey: "agent-end",
         nodes: [{ key: "agent-end", type: WorkflowNodeType.END, config: {} }],
       });
-      await workflowService.publish(agentFlow.id);
+      await workflowService.publish(resolveWorkspaceId, agentFlow.id);
 
       const graph = await workflowService.resolveActiveGraph(resolveWorkspaceId, agent.id);
       expect(graph.entryNodeKey).toBe("agent-end");
 
-      await workflowService.archive(workspaceDefault.id);
+      await workflowService.archive(resolveWorkspaceId, workspaceDefault.id);
     });
 
     it("falls back to the workspace default when the agent has no workflow of its own", async () => {
@@ -270,7 +304,7 @@ describe("WorkflowService (integration, real Postgres)", () => {
         entryNodeKey: "ws2-end",
         nodes: [{ key: "ws2-end", type: WorkflowNodeType.END, config: {} }],
       });
-      await workflowService.publish(workspaceDefault.id);
+      await workflowService.publish(resolveWorkspaceId, workspaceDefault.id);
 
       const graph = await workflowService.resolveActiveGraph(resolveWorkspaceId, otherAgent.id);
       expect(graph.entryNodeKey).toBe("ws2-end");

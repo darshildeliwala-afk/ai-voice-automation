@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -12,7 +13,7 @@ import {
   Put,
   Query,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiQuery, ApiTags } from "@nestjs/swagger";
 
 import { UpdateVoicePersonaConfigDto } from "../workspace-settings/dto/update-voice-persona-config.dto";
 import { VoicePersonaConfigService } from "../workspace-settings/voice-persona-config.service";
@@ -43,34 +44,68 @@ export class AiAgentController {
   }
 
   @Get(":id")
-  findOne(@Param("id", ParseUUIDPipe) id: string) {
-    return this.aiAgentService.getAiAgentById(id);
+  @ApiQuery({ name: "workspaceId", required: true, description: "Caller's workspace, for tenant-isolation" })
+  async findOne(
+    @Query("workspaceId", ParseUUIDPipe) workspaceId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    return this.assertAgentInWorkspace(workspaceId, id);
   }
 
   @Patch(":id")
-  update(
+  @ApiQuery({ name: "workspaceId", required: true, description: "Caller's workspace, for tenant-isolation" })
+  async update(
+    @Query("workspaceId", ParseUUIDPipe) workspaceId: string,
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateAiAgentDto,
   ) {
+    await this.assertAgentInWorkspace(workspaceId, id);
     return this.aiAgentService.updateAiAgent(id, dto);
   }
 
   @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param("id", ParseUUIDPipe) id: string): Promise<void> {
+  @ApiQuery({ name: "workspaceId", required: true, description: "Caller's workspace, for tenant-isolation" })
+  async remove(
+    @Query("workspaceId", ParseUUIDPipe) workspaceId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.assertAgentInWorkspace(workspaceId, id);
     await this.aiAgentService.softDeleteAiAgent(id);
   }
 
   @Get(":id/voice-persona")
-  getVoicePersonaOverride(@Param("id", ParseUUIDPipe) id: string) {
+  @ApiQuery({ name: "workspaceId", required: true, description: "Caller's workspace, for tenant-isolation" })
+  async getVoicePersonaOverride(
+    @Query("workspaceId", ParseUUIDPipe) workspaceId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ) {
+    await this.assertAgentInWorkspace(workspaceId, id);
     return this.voicePersonaConfigService.getAgentOverride(id);
   }
 
   @Put(":id/voice-persona")
-  updateVoicePersonaOverride(
+  @ApiQuery({ name: "workspaceId", required: true, description: "Caller's workspace, for tenant-isolation" })
+  async updateVoicePersonaOverride(
+    @Query("workspaceId", ParseUUIDPipe) workspaceId: string,
     @Param("id", ParseUUIDPipe) id: string,
     @Body() dto: UpdateVoicePersonaConfigDto,
   ) {
+    await this.assertAgentInWorkspace(workspaceId, id);
     return this.voicePersonaConfigService.updateAgentOverride(id, dto);
+  }
+
+  /**
+   * AiAgentService.getAiAgentById() only verifies the owning workspace
+   * still exists, not that it matches the caller's -- enforce that here
+   * (Sprint 21 tenant-isolation fix), the same defensive pattern already
+   * established in PromptBuilderService for this exact same gap.
+   */
+  private async assertAgentInWorkspace(workspaceId: string, id: string) {
+    const agent = await this.aiAgentService.getAiAgentById(id);
+    if (agent.workspaceId !== workspaceId) {
+      throw new NotFoundException(`AI Agent ${id} not found`);
+    }
+    return agent;
   }
 }

@@ -6,6 +6,7 @@ import { TTSProviderFactory } from "../ai/providers/tts-provider.factory";
 import { CallQueueService } from "../call-queue/call-queue.service";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { ConversationEngineService } from "../conversation-engine/conversation-engine.service";
+import { TelephonyProviderFactory } from "../telephony/providers/telephony-provider.factory";
 import { VoicePersonaConfigService } from "../workspace-settings/voice-persona-config.service";
 import { MEDIA_SESSION_CONFIG, type MediaSessionConfig } from "./media-session.config";
 import { MediaSession } from "./media-session";
@@ -30,6 +31,7 @@ export class MediaStreamGateway {
     private readonly conversationEngine: ConversationEngineService,
     private readonly callQueueService: CallQueueService,
     private readonly voicePersonaConfigService: VoicePersonaConfigService,
+    private readonly telephonyProviderFactory: TelephonyProviderFactory,
     @Inject(MEDIA_SESSION_CONFIG)
     private readonly mediaSessionConfig: MediaSessionConfig,
   ) {}
@@ -49,6 +51,7 @@ export class MediaStreamGateway {
       callQueueService: this.callQueueService,
       voicePersonaConfigService: this.voicePersonaConfigService,
       mediaSessionConfig: this.mediaSessionConfig,
+      telephonyProviderFactory: this.telephonyProviderFactory,
     });
 
     ws.on("message", (data: WebSocket.RawData) => session.handleMessage(data as Buffer));

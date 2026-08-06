@@ -63,7 +63,19 @@ describe("ConversationService (integration, real Postgres)", () => {
   });
 
   it("getConversationDetail 404s for a conversation that doesn't exist", async () => {
-    await expect(service.getConversationDetail(randomUUID())).rejects.toThrow();
+    await expect(
+      service.getConversationDetail(workspaceId, randomUUID()),
+    ).rejects.toThrow();
+  });
+
+  it("getConversationDetail 404s for a conversation belonging to a different workspace (Sprint 21 tenant isolation)", async () => {
+    const conversation = await prisma.conversation.create({
+      data: { workspaceId, customerId },
+    });
+
+    await expect(
+      service.getConversationDetail(randomUUID(), conversation.id),
+    ).rejects.toThrow();
   });
 
   it("returns messages, real toolCallId-joined tool calls, usage totals, and the attached summary", async () => {
@@ -125,7 +137,7 @@ describe("ConversationService (integration, real Postgres)", () => {
       },
     });
 
-    const detail = await service.getConversationDetail(conversation.id);
+    const detail = await service.getConversationDetail(workspaceId, conversation.id);
 
     expect(detail.messages.map((m) => m.role)).toEqual([
       "USER",

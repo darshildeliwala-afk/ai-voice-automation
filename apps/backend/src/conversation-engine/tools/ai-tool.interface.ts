@@ -3,7 +3,13 @@ export interface AIToolParameterSchema {
   type: "object";
   properties: Record<
     string,
-    { type: string; description: string; enum?: string[] }
+    {
+      type: string;
+      description: string;
+      enum?: string[];
+      /** Required by the JSON-Schema spec (and enforced by OpenAI's function-calling API) whenever `type` is "array". */
+      items?: { type: string };
+    }
   >;
   required?: string[];
 }

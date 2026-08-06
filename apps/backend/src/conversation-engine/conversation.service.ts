@@ -100,10 +100,14 @@ export class ConversationService extends BaseService {
     return { data, meta: buildPaginationMeta(total, pagination) };
   }
 
-  async getConversationDetail(id: string): Promise<ConversationDetail> {
+  /** Scoped to workspaceId -- a conversation belonging to another workspace is treated as not found (Sprint 21 tenant-isolation fix). */
+  async getConversationDetail(
+    workspaceId: string,
+    id: string,
+  ): Promise<ConversationDetail> {
     const conversation = this.throwIfNotFound(
       await this.prisma.conversation.findFirst({
-        where: { id },
+        where: { id, workspaceId },
         include: { summary: true },
       }),
       "Conversation",
